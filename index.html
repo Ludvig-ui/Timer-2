@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Swipe Timer</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: background-color 0.5s;
+      user-select: none;
+      overflow: hidden;
+    }
+
+    .swipe-hint {
+      height: 32px;
+      margin-bottom: 16px;
+      color: rgba(255,255,255,0.6);
+      font-weight: 500;
+      transition: opacity 0.2s;
+    }
+
+    .preset-name {
+      margin-bottom: 8px;
+      transition: all 0.15s;
+    }
+
+    .preset-name h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: white;
+    }
+
+    .dots {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 32px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.3);
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .dot:hover {
+      background: rgba(255,255,255,0.5);
+    }
+
+    .dot.active {
+      background: white;
+      transform: scale(1.25);
+    }
+
+    .timer-container {
+      position: relative;
+      margin-bottom: 32px;
+      transition: all 0.15s;
+    }
+
+    .timer-svg {
+      width: 256px;
+      height: 256px;
+      transform: rotate(-90deg);
+    }
+
+    .track {
+      fill: none;
+      stroke: rgba(255,255,255,0.1);
+      stroke-width: 8;
+    }
+
+    .progress {
+      fill: none;
+      stroke-width: 8;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 1s, stroke 0.5s;
+    }
+
+    .time-display {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 3.5rem;
+      font-family: ui-monospace, monospace;
+      font-weight: 700;
+      color: white;
+    }
+
+    .quote-container {
+      height: 48px;
+      margin-bottom: 24px;
+      padding: 0 32px;
+      max-width: 400px;
+      text-align: center;
+      transition: all 0.3s;
+    }
+
+    .quote {
+      font-size: 1.1rem;
+      font-weight: 500;
+      font-style: italic;
+      transition: color 0.5s;
+    }
+
+    .controls {
+      display: flex;
+      gap: 16px;
+    }
+
+    .btn {
+      padding: 12px 32px;
+      border-radius: 9999px;
+      font-weight: 600;
+      font-size: 1.1rem;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+    }
+
+    .btn-primary:hover {
+      filter: brightness(1.1);
+    }
+
+    .btn-primary.paused {
+      background: rgba(255,255,255,0.2);
+    }
+
+    .btn-primary.paused:hover {
+      background: rgba(255,255,255,0.3);
+    }
+
+    .btn-secondary {
+      background: rgba(255,255,255,0.1);
+      color: rgba(255,255,255,0.8);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255,255,255,0.2);
+    }
+
+    .instructions {
+      margin-top: 40px;
+      text-align: center;
+      color: rgba(255,255,255,0.4);
+      font-size: 0.875rem;
+      line-height: 1.6;
+    }
+
+    .slide-out {
+      opacity: 0;
+      transform: translateX(-32px);
+    }
+
+    .fade-out {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+  </style>
+</head>
+<body>
+  <div class="swipe-hint" id="swipeHint"></div>
+  
+  <div class="preset-name" id="presetName">
+    <h1 id="presetTitle">Pomodoro</h1>
+  </div>
+
+  <div class="dots" id="dots"></div>
+
+  <div class="timer-container" id="timerContainer">
+    <svg class="timer-svg" viewBox="0 0 256 256">
+      <circle class="track" cx="128" cy="128" r="120"/>
+      <circle class="progress" id="progress" cx="128" cy="128" r="120"/>
+    </svg>
+    <div class="time-display" id="timeDisplay">25:00</div>
+  </div>
+
+  <div class="quote-container" id="quoteContainer">
+    <p class="quote" id="quote">"Ship it. Iterate later."</p>
+  </div>
+
+  <div class="controls">
+    <button class="btn btn-primary" id="startBtn">Start</button>
+    <button class="btn btn-secondary" id="resetBtn">Reset</button>
+  </div>
+
+  <div class="instructions">
+    <p>← Swipe left for next timer</p>
+    <p>→ Swipe right to start</p>
+  </div>
+
+  <script>
+    const PRESETS = [
+      { name: 'Pomodoro', minutes: 25, bg: '#0f172a', accent: '#f97316', ring: '#f97316' },
+      { name: 'Short Break', minutes: 5, bg: '#022c22', accent: '#34d399', ring: '#34d399' },
+      { name: 'Long Break', minutes: 15, bg: '#082f49', accent: '#38bdf8', ring: '#38bdf8' },
+      { name: 'Focus Sprint', minutes: 10, bg: '#2e1065', accent: '#a78bfa', ring: '#a78bfa' },
+      { name: 'Deep Work', minutes: 45, bg: '#4c0519', accent: '#fb7185', ring: '#fb7185' },
+      { name: 'Quick Task', minutes: 2, bg: '#451a03', accent: '#fbbf24', ring: '#fbbf24' },
+    ];
+
+    const QUOTES = [
+      "Ship it. Iterate later.",
+      "Done is better than perfect.",
+      "Focus on impact, not activity.",
+      "Deep work beats busy work.",
+      "Protect your maker time.",
+      "Momentum compounds.",
+      "Start before you're ready.",
+      "Constraints breed creativity.",
+      "Simplify, then execute.",
+      "Energy management > time management.",
+      "Your environment shapes your output.",
+      "Batch the shallow work.",
+      "Say no to say yes.",
+      "Rest is productive.",
+      "One thing at a time.",
+      "Progress over perfection.",
+      "Automate the repetitive.",
+      "Build systems, not goals.",
+      "Clarity comes from action.",
+      "Finish what you start.",
+      "Small wins stack up.",
+      "Your best work needs boundaries.",
+      "Distraction is the enemy of depth.",
+      "Create before you consume.",
+      "Default to action.",
+      "Simplicity scales.",
+      "Work expands to fill time. Shrink it.",
+      "The best idea wins. Ship more ideas.",
+      "Optimize for learning speed.",
+      "Execution eats strategy for breakfast.",
+    ];
+
+    let presetIndex = 0;
+    let timeLeft = PRESETS[0].minutes * 60;
+    let isRunning = false;
+    let timerInterval = null;
+    let quoteIndex = 0;
+
+    const circumference = 2 * Math.PI * 120;
+
+    // Elements
+    const body = document.body;
+    const swipeHint = document.getElementById('swipeHint');
+    const presetName = document.getElementById('presetName');
+    const presetTitle = document.getElementById('presetTitle');
+    const dotsContainer = document.getElementById('dots');
+    const timerContainer = document.getElementById('timerContainer');
+    const progress = document.getElementById('progress');
+    const timeDisplay = document.getElementById('timeDisplay');
+    const quoteContainer = document.getElementById('quoteContainer');
+    const quote = document.getElementById('quote');
+    const startBtn = document.getElementById('startBtn');
+    const resetBtn = document.getElementById('resetBtn');
+
+    // Initialize
+    function init() {
+      progress.style.strokeDasharray = circumference;
+      renderDots();
+      updateUI();
+      startQuoteRotation();
+    }
+
+    function renderDots() {
+      dotsContainer.innerHTML = '';
+      PRESETS.forEach((_, i) => {
+        const dot = document.createElement('button');
+        dot.className = 'dot' + (i === presetIndex ? ' active' : '');
+        dot.onclick = () => switchPreset(i);
+        dotsContainer.appendChild(dot);
+      });
+    }
+
+    function updateUI() {
+      const preset = PRESETS[presetIndex];
+      const totalTime = preset.minutes * 60;
+      const progressValue = (totalTime - timeLeft) / totalTime;
+
+      body.style.backgroundColor = preset.bg;
+      body.style.setProperty('--accent', preset.accent);
+      presetTitle.textContent = preset.name;
+      timeDisplay.textContent = formatTime(timeLeft);
+      progress.style.stroke = preset.ring;
+      progress.style.strokeDashoffset = circumference * (1 - progressValue);
+      quote.style.color = preset.ring;
+      startBtn.textContent = isRunning ? 'Pause' : 'Start';
+      startBtn.classList.toggle('paused', isRunning);
+
+      document.querySelectorAll('.dot').forEach((dot, i) => {
+        dot.classList.toggle('active', i === presetIndex);
+      });
+    }
+
+    function formatTime(seconds) {
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    function switchPreset(index) {
+      presetIndex = index;
+      timeLeft = PRESETS[index].minutes * 60;
+      isRunning = false;
+      clearInterval(timerInterval);
+      updateUI();
+    }
+
+    function toggleTimer() {
+      isRunning = !isRunning;
+      if (isRunning) {
+        timerInterval = setInterval(() => {
+          if (timeLeft > 0) {
+            timeLeft--;
+            updateUI();
+          } else {
+            isRunning = false;
+            clearInterval(timerInterval);
+            updateUI();
+          }
+        }, 1000);
+      } else {
+        clearInterval(timerInterval);
+      }
+      updateUI();
+    }
+
+    function resetTimer() {
+      isRunning = false;
+      clearInterval(timerInterval);
+      timeLeft = PRESETS[presetIndex].minutes * 60;
+      updateUI();
+    }
+
+    function startQuoteRotation() {
+      setInterval(() => {
+        quoteContainer.classList.add('fade-out');
+        setTimeout(() => {
+          quoteIndex = (quoteIndex + 1) % QUOTES.length;
+          quote.textContent = `"${QUOTES[quoteIndex]}"`;
+          quoteContainer.classList.remove('fade-out');
+        }, 300);
+      }, 5000);
+    }
+
+    // Swipe handling
+    let touchStartX = 0;
+    let touchEndX = 0;
+    let mouseStartX = 0;
+    let isDragging = false;
+
+    function handleSwipe(diff) {
+      const minSwipeDistance = 80;
+      if (diff > minSwipeDistance) {
+        if (!isRunning) toggleTimer();
+        swipeHint.textContent = '';
+      } else if (diff < -minSwipeDistance) {
+        presetName.classList.add('slide-out');
+        timerContainer.classList.add('slide-out');
+        setTimeout(() => {
+          const nextIndex = (presetIndex + 1) % PRESETS.length;
+          switchPreset(nextIndex);
+          presetName.classList.remove('slide-out');
+          timerContainer.classList.remove('slide-out');
+        }, 150);
+        swipeHint.textContent = '';
+      } else {
+        swipeHint.textContent = '';
+      }
+    }
+
+    function showHint(diff) {
+      if (diff > 50) {
+        swipeHint.textContent = '→ Start';
+      } else if (diff < -50) {
+        swipeHint.textContent = '← Next Timer';
+      } else {
+        swipeHint.textContent = '';
+      }
+    }
+
+    // Touch events
+    body.addEventListener('touchstart', (e) => {
+      touchStartX = e.touches[0].clientX;
+    });
+
+    body.addEventListener('touchmove', (e) => {
+      touchEndX = e.touches[0].clientX;
+      showHint(touchEndX - touchStartX);
+    });
+
+    body.addEventListener('touchend', () => {
+      handleSwipe(touchEndX - touchStartX);
+      touchStartX = 0;
+      touchEndX = 0;
+    });
+
+    // Mouse events
+    body.addEventListener('mousedown', (e) => {
+      mouseStartX = e.clientX;
+      isDragging = true;
+    });
+
+    body.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      showHint(e.clientX - mouseStartX);
+    });
+
+    body.addEventListener('mouseup', (e) => {
+      if (!isDragging) return;
+      handleSwipe(e.clientX - mouseStartX);
+      isDragging = false;
+      mouseStartX = 0;
+    });
+
+    body.addEventListener('mouseleave', () => {
+      isDragging = false;
+      swipeHint.textContent = '';
+    });
+
+    // Button events
+    startBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleTimer();
+    });
+
+    resetBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      resetTimer();
+    });
+
+    init();
+  </script>
+</body>
+</html>
