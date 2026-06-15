@@ -145,7 +145,7 @@ const player = {
   px: 7*TILE, py: 7*TILE, // pixel position (for smooth walking)
   dir: 'down',
   moving: false, mvFrom:null, mvTo:null, mvT:0,
-  walkFrame: 0, walkTimer: 0,
+  walkFrame: 0, walkTimer: 0, walkPhase: 0,
   party: [],              // owned caps
   capsule: 8,             // catch items
   caught: {}              // species id -> true (capdex)
@@ -229,10 +229,9 @@ function updateWorld(dt) {
 
   if (player.moving) {
     player.mvT += dt / STEP_TIME;
-    player.walkTimer += dt;
-    if (player.walkTimer > 0.07) { player.walkTimer = 0; player.walkFrame ^= 1; }
+    player.walkPhase += dt / 0.12;     // continuous stride, not reset each tile
     if (player.mvT >= 1) {
-      player.moving = false; player.mvT = 0; player.walkFrame = 0;
+      player.moving = false; player.mvT = 0;
       player.tx = player.mvTo.x; player.ty = player.mvTo.y;
       player.px = player.tx*TILE; player.py = player.ty*TILE;
       // arrived: encounter check
@@ -266,6 +265,7 @@ function updateWorld(dt) {
       faceTrainer();
     }
   }
+  if (!d && !player.moving) player.walkPhase = 0;   // settle to idle pose
 }
 
 function facingTile() {
@@ -652,6 +652,8 @@ function drawWorld() {
   if (npc.active) drawTrainer(npc.tx*TILE, npc.ty*TILE);
   // Player
   drawPlayer(player.px, player.py);
+  // a little bug flitting about for life
+  drawBug();
   // HUD: capsule + capdex
   drawWorldHud();
 }
@@ -712,43 +714,47 @@ function drawCapMini(x,y,color){
 function capFallback(id){
   return (x,y,w,h)=>{
     const sp=SPECIES[id]; const u=w/16;
+    const outline='#141d33';
     const R=(ax,ay,aw,ah,c)=>{ ctx.fillStyle=c; ctx.fillRect(x+ax*u, y+ay*u, aw*u, ah*u); };
-    const dark=shade(sp.color,-0.28), darker=shade(sp.color,-0.45), light=shade(sp.color,0.22);
+    // mass with a dark outline around it
+    const RB=(ax,ay,aw,ah,c)=>{ ctx.fillStyle=outline; ctx.fillRect(x+(ax-0.45)*u,y+(ay-0.45)*u,(aw+0.9)*u,(ah+0.9)*u); ctx.fillStyle=c; ctx.fillRect(x+ax*u,y+ay*u,aw*u,ah*u); };
+    const dark=shade(sp.color,-0.3), darker=shade(sp.color,-0.5), light=shade(sp.color,0.25);
     // ground shadow
     ctx.fillStyle='rgba(0,0,0,0.16)';
     ctx.beginPath(); ctx.ellipse(x+8*u, y+15.2*u, 5.5*u, 1.6*u, 0,0,Math.PI*2); ctx.fill();
-    // little feet
-    R(5,13.6,2.4,2,'#33271a'); R(8.2,13.6,2.4,2,'#33271a');
-    R(5,15.2,2.4,0.6,'#1f160d'); R(8.2,15.2,2.4,0.6,'#1f160d');
+    // little feet (outlined)
+    RB(5,13.6,2.4,2,'#3a2c1c'); RB(8.2,13.6,2.4,2,'#3a2c1c');
 
     let ey;
     if (id==='snapback'){
       ey=6;
-      R(2,10,12.5,2,dark);                 // flat brim
-      R(2,11.6,13,1.4,darker);
-      R(4,2.6,8,7.4,sp.color);             // structured crown
-      R(4,2.6,8,2,light);
+      RB(2,10,12.5,2,dark);                // flat brim
+      R(2,11.6,13,1.2,darker);
+      RB(4,2.6,8,7.4,sp.color);            // structured crown
+      R(4,2.6,8,2,light);                  // rim light
+      R(4,8.6,8,1.4,dark);                 // bottom shading
       R(5,4.6,6,4,sp.accent);              // white front panel
       R(5,4.6,6,1,'#dfe6ef');
-      R(7.6,1.8,0.9,1.1,light);            // top button
+      R(7.6,1.7,0.9,1.1,light);            // top button
       R(7.7,2.6,0.6,7,dark);               // seam
     } else if (id==='camp'){
       ey=6.6;
-      R(3,10,10,2,dark);                   // short curved brim
-      R(4,11.5,8.5,1.2,darker);
-      R(4,3.6,8,6.6,sp.color);             // rounded crown
+      RB(3,10,10,2,dark);                  // short curved brim
+      R(4,11.4,8.5,1.1,darker);
+      RB(4,3.6,8,6.6,sp.color);            // rounded crown
       R(4,3.6,8,2,light);
+      R(4,9.2,8,1,dark);
       R(5,6,6,3,sp.accent);                // soft front
       R(7.7,3.6,0.6,6.4,dark);             // 5-panel seams
       R(5.6,4,0.5,6,dark); R(9.9,4,0.5,6,dark);
     } else { // bucket
       ey=7.2;
-      R(4,3.6,8,6.4,sp.color);             // dome
+      RB(4,3.6,8,6.4,sp.color);            // dome
       R(4,3.6,8,2,light);
       R(4,6,8,0.5,dark); R(4,7.6,8,0.5,dark); // stitch lines
-      R(1.6,9.2,12.8,2,dark);              // floppy downturned brim
-      R(1.2,10.8,13.6,2.2,sp.color);
-      R(1.2,12.4,13.6,1.4,darker);
+      RB(1.4,9.2,13.2,2,dark);             // floppy downturned brim
+      R(1.2,10.8,13.6,2,sp.color);
+      R(1.2,12.4,13.6,1.2,darker);
     }
     // eyes (whites, pupils, shine) + cheeks
     R(5.4,ey,2.1,2.4,'#fff'); R(8.6,ey,2.1,2.4,'#fff');
@@ -765,37 +771,52 @@ function shadow(cx,cy,rx,ry){
   ctx.fillStyle='rgba(0,0,0,0.18)';
   ctx.beginPath(); ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2); ctx.fill();
 }
-// Shared chibi trainer sprite. frame: -1 idle, 0/1 walk steps.
+// Shared chibi trainer sprite.
+// frame: -1 idle, otherwise a 4-phase walk cycle (0 step L, 1 pass, 2 step R, 3 pass)
 function drawTrainerSprite(x,y,cap,body,dir,frame){
   const R=(ax,ay,aw,ah,c)=>{ ctx.fillStyle=c; ctx.fillRect(x+ax,y+ay,aw,ah); };
-  const skin='#f1c27d', skinD='#d9a35f', shoe='#26324a';
-  // legs (animated stride)
-  R(5,13,2,3,shoe); R(9,13,2,3,shoe);
-  if (frame===0){ R(5,14,2,2,shade(body,-0.2)); }
-  else if (frame===1){ R(9,14,2,2,shade(body,-0.2)); }
-  // body + arms
-  R(4,8,8,6,body); R(4,8,8,1,shade(body,0.22));
-  R(3,9,1.6,4,shade(body,-0.18)); R(11.4,9,1.6,4,shade(body,-0.18));
-  // head
-  R(5,3,6,5,skin); R(5,7,6,1,skinD);
-  // cap crown + brim by facing direction
-  R(4,2,8,3,cap); R(4,4,8,1,shade(cap,-0.28));
-  if (dir==='up')      R(4,1.4,8,1,shade(cap,-0.3));
-  else if (dir==='left')  R(2.6,4,3,1.4,shade(cap,-0.3));
-  else if (dir==='right') R(10.4,4,3,1.4,shade(cap,-0.3));
-  else                 R(4,5,8,1.3,shade(cap,-0.3));
+  const skin='#f1c27d', skinD='#d9a35f', shoe='#26324a', outline='#1b2236';
+  const walking = frame>=0;
+  const passing = frame===1 || frame===3;
+  const lift = passing ? 1 : 0;        // body lifts slightly on passing frames
+  const yb = -lift;
+  // ---- legs (short alternating steps) ----
+  if (!walking || passing){
+    R(5,13,2.4,3,shoe); R(8.6,13,2.4,3,shoe);
+  } else if (frame===0){
+    R(4.7,13,2.4,3,shoe); R(9.0,12.5,2.4,3,shoe);
+  } else { // frame 2
+    R(9.0,13,2.4,3,shoe); R(4.7,12.5,2.4,3,shoe);
+  }
+  R(5,15.4,2.4,0.7,outline); R(8.6,15.4,2.4,0.7,outline);
+  // ---- torso (lifted with bob) + swinging arms ----
+  R(3.6,7.6+yb,8.8,6.8,outline);                 // body outline
+  R(4,8+yb,8,6,body); R(4,8+yb,8,1,shade(body,0.25)); R(4,13+yb,8,1,shade(body,-0.28));
+  let la=9, ra=9;
+  if (walking && !passing){ if (frame===0){ la=10; ra=8.2; } else { la=8.2; ra=10; } }
+  R(2.8,la+yb,1.9,4,shade(body,-0.2)); R(11.3,ra+yb,1.9,4,shade(body,-0.2));
+  // ---- head ----
+  R(4.6,2.6+yb,6.8,5.8,outline);                 // head/cap outline
+  R(5,3+yb,6,5,skin); R(5,7+yb,6,1,skinD);
+  // cap crown + rim light + dark band
+  R(4.4,1.8+yb,7.2,3,cap); R(4.4,1.8+yb,7.2,1,shade(cap,0.3)); R(4.4,3.8+yb,7.2,1,shade(cap,-0.3));
+  if (dir==='up')      R(4.4,1.2+yb,7.2,1,shade(cap,-0.32));
+  else if (dir==='left')  R(2.6,3.8+yb,3,1.5,shade(cap,-0.32));
+  else if (dir==='right') R(10.4,3.8+yb,3,1.5,shade(cap,-0.32));
+  else                 R(4.4,4.8+yb,7.2,1.3,shade(cap,-0.32));
   // eyes by facing direction
-  if (dir==='up'){ R(5,4,6,3,'#5a3a25'); }                       // back of head
-  else if (dir==='left'){ R(5.6,5,1.3,1.7,'#1b1f3a'); }
-  else if (dir==='right'){ R(9.1,5,1.3,1.7,'#1b1f3a'); }
-  else { R(6,5,1.3,1.7,'#1b1f3a'); R(8.7,5,1.3,1.7,'#1b1f3a'); }
+  if (dir==='up'){ R(5,3.8+yb,6,3,'#5a3a25'); }
+  else if (dir==='left'){ R(5.6,5+yb,1.3,1.8,'#1b1f3a'); }
+  else if (dir==='right'){ R(9.1,5+yb,1.3,1.8,'#1b1f3a'); }
+  else { R(6,5+yb,1.3,1.8,'#1b1f3a'); R(8.7,5+yb,1.3,1.8,'#1b1f3a'); }
 }
 function drawPlayer(px_,py_){
   const x=px_, y=py_;
   shadow(x+8, y+15.5, 6, 2.2);
   const bob = (!player.moving && Math.sin(T*3)<0) ? -1 : 0;
+  const wf = player.moving ? (Math.floor(player.walkPhase)%4) : -1;
   drawSpriteFit('player', x-2, y-4+bob, 20, 22,
-    ()=> drawTrainerSprite(x, y+bob, '#e63946', '#2f5fa0', player.dir, player.moving?player.walkFrame:-1));
+    ()=> drawTrainerSprite(x, y+bob, '#e63946', '#2f5fa0', player.dir, wf));
 }
 function drawTrainer(x,y){
   shadow(x+8, y+15.5, 6, 2.2);
@@ -820,6 +841,8 @@ function drawBattle(){
   ctx.fillStyle=g; ctx.fillRect(0,0,VW,VH);
   ctx.fillStyle='#cfe39f';
   ctx.beginPath(); ctx.moveTo(0,98); ctx.lineTo(VW,72); ctx.lineTo(VW,VH); ctx.lineTo(0,VH); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.75)';
+  cloud(38 + Math.sin(T*0.2)*4, 18, 9); cloud(150, 12, 7); cloud(212 + Math.sin(T*0.15)*3, 26, 8);
   ctx.fillStyle='#a9cd7a'; ctx.beginPath(); ctx.ellipse(176,60,42,11,0,0,Math.PI*2); ctx.fill();
   ctx.fillStyle='#9bc36b'; ctx.beginPath(); ctx.ellipse(60,122,48,13,0,0,Math.PI*2); ctx.fill();
 
@@ -865,6 +888,10 @@ function drawBattle(){
     drawCapBig(b.me.species.id, 34+meSlide+meDX, 86+meDY+meBob+b.faintMe*22, 52);
     ctx.restore();
   }
+
+  // --- impact sparks ---
+  if (b.flashEn>0) hitSpark(176,42);
+  if (b.flashMe>0) hitSpark(60,96);
 
   // --- floating damage numbers ---
   for (const p of b.popups){
@@ -993,6 +1020,26 @@ function drawSparkle(x, y, r, c){
   ctx.fillStyle=c;
   ctx.fillRect(x-1, y-r, 2, r*2);
   ctx.fillRect(x-r, y-1, r*2, 2);
+}
+function hitSpark(cx, cy){
+  for (let i=0;i<5;i++){ const a=i/5*Math.PI*2 + T*10; drawSparkle(cx+Math.cos(a)*6, cy+Math.sin(a)*6, 3, '#fff'); }
+  drawSparkle(cx, cy, 4, '#ffd166');
+}
+function cloud(cx, cy, r){
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, r, r*0.6, 0, 0, Math.PI*2);
+  ctx.ellipse(cx+r, cy+2, r*0.8, r*0.5, 0, 0, Math.PI*2);
+  ctx.ellipse(cx-r, cy+2, r*0.7, r*0.45, 0, 0, Math.PI*2);
+  ctx.fill();
+}
+function drawBug(){
+  const bx = 16 + (Math.sin(T*0.6)*0.5+0.5)*200;
+  const by = 22 + Math.sin(T*1.9)*8 + (Math.cos(T*0.4)*0.5+0.5)*36;
+  const f = (T*12|0)%2;
+  ctx.fillStyle='#3a2a1a'; ctx.fillRect(bx,by,1,2);          // body
+  ctx.fillStyle='#ffd166';
+  if (f){ ctx.fillRect(bx-2,by-1,2,2); ctx.fillRect(bx+1,by-1,2,2); }
+  else  { ctx.fillRect(bx-2,by,2,2);   ctx.fillRect(bx+1,by,2,2); }
 }
 
 // ---------- main loop ----------
