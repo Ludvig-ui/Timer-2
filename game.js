@@ -190,6 +190,7 @@ const npc = {
 let state = 'title';   // title | choose | world | battle
 let battle = null;
 let dialog = null;     // {lines:[], i, char, t, onDone}
+let T = 0;             // global animation clock (seconds)
 
 function say(lines, onDone) {
   dialog = { lines: Array.isArray(lines)?lines:[lines], i:0, char:0, t:0, onDone };
@@ -306,11 +307,15 @@ function beginBattle(enemy, isWild, trainerName) {
   battle = {
     enemy, isWild, trainerName,
     me: activeCap(),
-    phase: 'intro',         // intro|menu|fight|run|resolve|catch|end
+    phase: 'intro',         // intro|menu|fight|resolve|capture|end
     menuIdx: 0, moveIdx: 0,
-    msg: null, msgQueue: [],
     shake: 0, flashMe:0, flashEn:0,
-    capAnim: 0, result: null,
+    introT: 0, flash: 1,     // entrance slide + white transition flash
+    lunge: null,             // {who, t} attack lunge
+    popups: [],              // floating damage numbers
+    faintEn: 0, faintMe: 0,  // faint animation progress
+    cap: null,               // capture animation state
+    result: null,
     enemyMaxHp: enemy.maxHp,
     meHpShown: 0, enHpShown: 0
   };
@@ -323,6 +328,17 @@ function updateBattle(dt) {
   const b = battle;
   if (b.shake>0) b.shake = Math.max(0, b.shake - dt*60);
   if (b.flashMe>0) b.flashMe -= dt; if (b.flashEn>0) b.flashEn -= dt;
+  // entrance + transition flash
+  b.introT += dt;
+  if (b.flash>0) b.flash -= dt*2.2;
+  // attack lunge
+  if (b.lunge){ b.lunge.t += dt; if (b.lunge.t>0.3) b.lunge=null; }
+  // floating damage numbers
+  for (const p of b.popups) p.t += dt;
+  if (b.popups.length) b.popups = b.popups.filter(p => p.t < 0.9);
+  // faint animations
+  if (b.enemy.hp<=0 && !(b.cap)) b.faintEn = Math.min(1, b.faintEn + dt*2);
+  if (b.me.hp<=0) b.faintMe = Math.min(1, b.faintMe + dt*2);
   // animate hp bars toward real value
   b.meHpShown += clampAbs(b.me.hp - b.meHpShown, dt*40);
   b.enHpShown += clampAbs(b.enemy.hp - b.enHpShown, dt*40);
@@ -332,6 +348,34 @@ function updateBattle(dt) {
   switch (b.phase) {
     case 'intro':
       b.phase = 'menu'; break;
+
+    case 'capture': {
+      const c = b.cap; c.t += dt;
+      if (c.t >= 0.85) {
+        const wig = Math.floor((c.t - 0.85) / 0.55);
+        if (wig >= 3 && !c.done) {
+          c.done = true;
+          if (c.success) {
+            const caught = b.enemy;
+            const fresh = makeCap(caught.species.id, caught.level);
+            player.party.push(fresh);
+            const isNew = !player.caught[caught.species.id];
+            player.caught[caught.species.id] = true;
+            b.result='caught'; b.phase='end';
+            const lines = [`${caught.species.name} fångades!`];
+            if (isNew) lines.push('Ny post i CAPDEX!');
+            say(lines);
+          } else {
+            b.cap = null;
+            say([`${b.enemy.species.name} slet sig loss!`], () => {
+              b.phase='resolve';
+              runActions([['en', enemyMove()]], 0);
+            });
+          }
+        }
+      }
+      break;
+    }
 
     case 'menu': {
       const cols = 2;
@@ -407,6 +451,8 @@ function runActions(order, i) {
   }
   const { dmg, mult } = calcDamage(atk, def, move);
   def.hp = Math.max(0, def.hp - dmg);
+  b.lunge = { who, t:0 };
+  b.popups.push(who==='me' ? {x:176,y:42,val:dmg,t:0} : {x:60,y:96,val:dmg,t:0});
   if (who==='me') { b.flashEn = 0.25; b.shake = 6; } else { b.flashMe = 0.25; b.shake = 6; }
   const eff = mult>1 ? ' Träffsäkert!' : (mult<1 ? ' Föga effektivt...' : '');
   const lines = [`${name} använde ${move.name}!`];
@@ -470,27 +516,9 @@ function tryCatch() {
   // catch chance: higher when enemy HP low
   const hpFrac = b.enemy.hp / b.enemyMaxHp;
   const chance = Math.min(0.92, 0.45 + (1 - hpFrac) * 0.5);
-  b.capAnim = 1;
   say(['Du kastar en CAPSULE!'], () => {
-    if (Math.random() < chance) {
-      const caught = b.enemy;
-      caught.hp = caught.maxHp;
-      const fresh = makeCap(caught.species.id, caught.level);
-      player.party.push(fresh);
-      const isNew = !player.caught[caught.species.id];
-      player.caught[caught.species.id] = true;
-      b.result='caught'; b.phase='end';
-      const lines = [`${caught.species.name} fångades!`];
-      if (isNew) lines.push('Ny post i CAPDEX!');
-      say(lines);
-    } else {
-      b.capAnim = 0;
-      say([`${b.enemy.species.name} slet sig loss!`], () => {
-        // enemy gets a turn
-        b.phase='resolve';
-        runActions([['en', enemyMove()]], 0);
-      });
-    }
+    b.phase = 'capture';
+    b.cap = { t:0, success: Math.random() < chance, done:false };
   });
 }
 
@@ -603,7 +631,8 @@ function drawChoose() {
     const sel=i===chooseIdx;
     if (sel){ px(x-26,y-30,52,62,'#ffd166'); }
     px(x-23,y-27,46,56,'#1b1f3a');
-    drawCapBig(id, x-16, y-22, 32, 0);
+    const bob = sel ? Math.sin(T*4)*1.6 : 0;
+    drawCapBig(id, x-16, y-22+bob, 32);
     ctx.fillStyle = sel?'#ffd166':'#9aa3c4';
     ctx.font='6px "Press Start 2P", monospace';
     ctx.fillText(sp.name, x, y+24);
@@ -629,21 +658,34 @@ function drawWorld() {
 
 function drawTile(x,y,t){
   const X=x*TILE, Y=y*TILE;
+  // base grass with subtle checker so the field reads as tiles
+  px(X,Y,TILE,TILE,'#79b35a');
+  if ((x+y)%2===0) px(X,Y,TILE,TILE,'#7eb85f');
   if (t===2){ // tree
-    px(X,Y,TILE,TILE,'#5a8a44');
-    px(X+2,Y+1,12,11,'#2f6b34');
-    px(X+4,Y+3,8,7,'#3f7d42');
-    px(X+6,Y+12,4,4,'#6b4a2a');
+    ctx.fillStyle='rgba(0,0,0,0.12)';
+    ctx.beginPath(); ctx.ellipse(X+8,Y+14,7,2.4,0,0,Math.PI*2); ctx.fill();
+    px(X+6,Y+8,4,7,'#6b4a2a'); px(X+6,Y+8,1,7,'#7d5733');   // trunk
+    px(X+1,Y+1,14,9,'#2f6b34');                              // canopy
+    px(X+2,Y+0,12,4,'#3f7d42');
+    px(X+3,Y+2,5,3,'#54994f');                               // highlight
+    px(X+1,Y+8,14,1,'#245327');
   } else if (t===3){ // path
     px(X,Y,TILE,TILE,'#caa771');
-    px(X+3,Y+5,2,2,'#b8945e'); px(X+10,Y+9,2,2,'#b8945e');
-  } else if (t===1){ // tall grass
+    px(X,Y,TILE,1,'#d8b988');
+    px(X+3,Y+5,2,2,'#b8945e'); px(X+10,Y+9,2,2,'#b8945e'); px(X+7,Y+2,1,1,'#b8945e');
+  } else if (t===1){ // tall grass (sways with the clock)
     px(X,Y,TILE,TILE,'#5fa047');
+    px(X,Y+13,TILE,3,'#4c8a3a');
+    const sway=Math.sin(T*2 + x*0.7 + y*0.5)*1.2;
     ctx.fillStyle='#3c7a32';
-    for (let i=0;i<5;i++){ const gx=X+2+i*3; ctx.fillRect(gx,Y+8,2,7); ctx.fillRect(gx+1,Y+5,1,4); }
-  } else { // grass
-    px(X,Y,TILE,TILE,'#79b35a');
-    px(X+4,Y+10,2,1,'#6aa34d'); px(X+11,Y+4,2,1,'#6aa34d');
+    for (let i=0;i<5;i++){ const gx=X+2+i*3; ctx.fillRect(gx+sway*((i%2)?1:-1),Y+7,1.6,8); ctx.fillRect(gx+1+sway,Y+4,1,4); }
+    ctx.fillStyle='#6fb255';
+    for (let i=0;i<4;i++){ const gx=X+3+i*3; ctx.fillRect(gx,Y+9,1,5); }
+  } else { // plain grass with deterministic flowers / tufts
+    const hsh=(x*7+y*13)%9;
+    if (hsh===0){ px(X+5,Y+6,2,2,'#ffd166'); px(X+5,Y+5,2,1,'#fff0b3'); px(X+4,Y+8,1,2,'#3f7d42'); }
+    else if (hsh===3){ px(X+10,Y+10,2,2,'#e98fb5'); px(X+10,Y+9,2,1,'#ffd0e2'); px(X+11,Y+12,1,2,'#3f7d42'); }
+    else { px(X+4,Y+10,2,1,'#6aa34d'); px(X+11,Y+4,2,1,'#6aa34d'); }
   }
 }
 
@@ -670,47 +712,99 @@ function drawCapMini(x,y,color){
 function capFallback(id){
   return (x,y,w,h)=>{
     const sp=SPECIES[id]; const u=w/16;
-    // crown
-    ctx.fillStyle=sp.color; ctx.fillRect(x+3*u,y+3*u,10*u,6*u);
-    ctx.fillRect(x+4*u,y+2*u,8*u,2*u);
-    // front panel / accent
-    ctx.fillStyle=sp.accent; ctx.fillRect(x+5*u,y+4*u,6*u,4*u);
-    // brim
-    ctx.fillStyle=sp.color; ctx.fillRect(x+2*u,y+9*u,13*u,2*u);
-    // eyes
-    ctx.fillStyle='#1b1f3a'; ctx.fillRect(x+6*u,y+5*u,1.5*u,2*u); ctx.fillRect(x+9*u,y+5*u,1.5*u,2*u);
-    // feet
-    ctx.fillStyle='#3a2a1a'; ctx.fillRect(x+5*u,y+12*u,2*u,2*u); ctx.fillRect(x+9*u,y+12*u,2*u,2*u);
+    const R=(ax,ay,aw,ah,c)=>{ ctx.fillStyle=c; ctx.fillRect(x+ax*u, y+ay*u, aw*u, ah*u); };
+    const dark=shade(sp.color,-0.28), darker=shade(sp.color,-0.45), light=shade(sp.color,0.22);
+    // ground shadow
+    ctx.fillStyle='rgba(0,0,0,0.16)';
+    ctx.beginPath(); ctx.ellipse(x+8*u, y+15.2*u, 5.5*u, 1.6*u, 0,0,Math.PI*2); ctx.fill();
+    // little feet
+    R(5,13.6,2.4,2,'#33271a'); R(8.2,13.6,2.4,2,'#33271a');
+    R(5,15.2,2.4,0.6,'#1f160d'); R(8.2,15.2,2.4,0.6,'#1f160d');
+
+    let ey;
+    if (id==='snapback'){
+      ey=6;
+      R(2,10,12.5,2,dark);                 // flat brim
+      R(2,11.6,13,1.4,darker);
+      R(4,2.6,8,7.4,sp.color);             // structured crown
+      R(4,2.6,8,2,light);
+      R(5,4.6,6,4,sp.accent);              // white front panel
+      R(5,4.6,6,1,'#dfe6ef');
+      R(7.6,1.8,0.9,1.1,light);            // top button
+      R(7.7,2.6,0.6,7,dark);               // seam
+    } else if (id==='camp'){
+      ey=6.6;
+      R(3,10,10,2,dark);                   // short curved brim
+      R(4,11.5,8.5,1.2,darker);
+      R(4,3.6,8,6.6,sp.color);             // rounded crown
+      R(4,3.6,8,2,light);
+      R(5,6,6,3,sp.accent);                // soft front
+      R(7.7,3.6,0.6,6.4,dark);             // 5-panel seams
+      R(5.6,4,0.5,6,dark); R(9.9,4,0.5,6,dark);
+    } else { // bucket
+      ey=7.2;
+      R(4,3.6,8,6.4,sp.color);             // dome
+      R(4,3.6,8,2,light);
+      R(4,6,8,0.5,dark); R(4,7.6,8,0.5,dark); // stitch lines
+      R(1.6,9.2,12.8,2,dark);              // floppy downturned brim
+      R(1.2,10.8,13.6,2.2,sp.color);
+      R(1.2,12.4,13.6,1.4,darker);
+    }
+    // eyes (whites, pupils, shine) + cheeks
+    R(5.4,ey,2.1,2.4,'#fff'); R(8.6,ey,2.1,2.4,'#fff');
+    R(6.0,ey+0.5,1.1,1.5,'#1b1f3a'); R(9.2,ey+0.5,1.1,1.5,'#1b1f3a');
+    R(6.0,ey+0.4,0.5,0.5,'#fff'); R(9.2,ey+0.4,0.5,0.5,'#fff');
+    R(5.0,ey+2.5,1.2,0.9,'#ff9bb0'); R(9.9,ey+2.5,1.2,0.9,'#ff9bb0');
   };
 }
 function drawCapBig(id,x,y,size){
   drawSpriteFit(SPECIES[id].sprite, x, y, size, size, capFallback(id));
 }
 
+function shadow(cx,cy,rx,ry){
+  ctx.fillStyle='rgba(0,0,0,0.18)';
+  ctx.beginPath(); ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2); ctx.fill();
+}
+// Shared chibi trainer sprite. frame: -1 idle, 0/1 walk steps.
+function drawTrainerSprite(x,y,cap,body,dir,frame){
+  const R=(ax,ay,aw,ah,c)=>{ ctx.fillStyle=c; ctx.fillRect(x+ax,y+ay,aw,ah); };
+  const skin='#f1c27d', skinD='#d9a35f', shoe='#26324a';
+  // legs (animated stride)
+  R(5,13,2,3,shoe); R(9,13,2,3,shoe);
+  if (frame===0){ R(5,14,2,2,shade(body,-0.2)); }
+  else if (frame===1){ R(9,14,2,2,shade(body,-0.2)); }
+  // body + arms
+  R(4,8,8,6,body); R(4,8,8,1,shade(body,0.22));
+  R(3,9,1.6,4,shade(body,-0.18)); R(11.4,9,1.6,4,shade(body,-0.18));
+  // head
+  R(5,3,6,5,skin); R(5,7,6,1,skinD);
+  // cap crown + brim by facing direction
+  R(4,2,8,3,cap); R(4,4,8,1,shade(cap,-0.28));
+  if (dir==='up')      R(4,1.4,8,1,shade(cap,-0.3));
+  else if (dir==='left')  R(2.6,4,3,1.4,shade(cap,-0.3));
+  else if (dir==='right') R(10.4,4,3,1.4,shade(cap,-0.3));
+  else                 R(4,5,8,1.3,shade(cap,-0.3));
+  // eyes by facing direction
+  if (dir==='up'){ R(5,4,6,3,'#5a3a25'); }                       // back of head
+  else if (dir==='left'){ R(5.6,5,1.3,1.7,'#1b1f3a'); }
+  else if (dir==='right'){ R(9.1,5,1.3,1.7,'#1b1f3a'); }
+  else { R(6,5,1.3,1.7,'#1b1f3a'); R(8.7,5,1.3,1.7,'#1b1f3a'); }
+}
 function drawPlayer(px_,py_){
   const x=px_, y=py_;
-  drawSpriteFit('player', x-2, y-6, 20, 22, (X,Y)=>{
-    // fallback chibi trainer
-    px(x+4,y-4,8,6,'#e63946');           // cap
-    px(x+3,y-1,10,2,'#e63946');          // brim
-    px(x+5,y+1,6,4,'#f1c27d');           // face
-    px(x+6,y+2,1,1,'#000'); px(x+9,y+2,1,1,'#000');
-    px(x+4,y+5,8,6,'#3a6ea5');           // body
-    px(x+4,y+11,3,3,'#222'); px(x+9,y+11,3,3,'#222'); // legs
-  });
+  shadow(x+8, y+15.5, 6, 2.2);
+  const bob = (!player.moving && Math.sin(T*3)<0) ? -1 : 0;
+  drawSpriteFit('player', x-2, y-4+bob, 20, 22,
+    ()=> drawTrainerSprite(x, y+bob, '#e63946', '#2f5fa0', player.dir, player.moving?player.walkFrame:-1));
 }
 function drawTrainer(x,y){
-  drawSpriteFit('npc', x-2, y-6, 20, 22, (X,Y)=>{
-    px(x+4,y-4,8,6,'#5f6f3a');
-    px(x+3,y-1,10,2,'#5f6f3a');
-    px(x+5,y+1,6,4,'#f1c27d');
-    px(x+6,y+2,1,1,'#000'); px(x+9,y+2,1,1,'#000');
-    px(x+4,y+5,8,6,'#7a4a2a');
-    px(x+4,y+11,3,3,'#222'); px(x+9,y+11,3,3,'#222');
-  });
+  shadow(x+8, y+15.5, 6, 2.2);
+  const bob = (Math.sin(T*2.4)<0) ? -1 : 0;
+  drawSpriteFit('npc', x-2, y-4+bob, 20, 22,
+    ()=> drawTrainerSprite(x, y+bob, '#4f5f2f', '#8a5a2a', 'down', -1));
   if (!npc.defeated){
     ctx.fillStyle='#ffd166'; ctx.font='8px "Press Start 2P", monospace'; ctx.textAlign='center';
-    if ((performance.now()/400|0)%2===0) ctx.fillText('!', x+8, y-7);
+    if ((T*2|0)%2===0) ctx.fillText('!', x+8, y-7);
     ctx.textAlign='left';
   }
 }
@@ -719,42 +813,84 @@ function drawTrainer(x,y){
 function drawBattle(){
   const b=battle;
   const sh = b.shake>0 ? (Math.random()*b.shake-b.shake/2) : 0;
-  clear('#e8f0d8');
-  // ground arcs
-  px(0,0,VW,VH,'#dfeac8');
-  ctx.fillStyle='#bcd49a'; ctx.beginPath();
-  ctx.ellipse(176,56,40,12,0,0,Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(58,120,46,14,0,0,Math.PI*2); ctx.fill();
 
-  // enemy (top right)
-  if (b.flashEn<=0 || (b.flashEn*20|0)%2===0){
-    if (b.capAnim>0){
-      // shrinking into capsule
+  // --- background: sky gradient + sloped ground + platforms ---
+  const g=ctx.createLinearGradient(0,0,0,VH);
+  g.addColorStop(0,'#bfe3f0'); g.addColorStop(0.55,'#dcefcf'); g.addColorStop(1,'#e9f3d6');
+  ctx.fillStyle=g; ctx.fillRect(0,0,VW,VH);
+  ctx.fillStyle='#cfe39f';
+  ctx.beginPath(); ctx.moveTo(0,98); ctx.lineTo(VW,72); ctx.lineTo(VW,VH); ctx.lineTo(0,VH); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#a9cd7a'; ctx.beginPath(); ctx.ellipse(176,60,42,11,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#9bc36b'; ctx.beginPath(); ctx.ellipse(60,122,48,13,0,0,Math.PI*2); ctx.fill();
+
+  // --- animation offsets ---
+  const intro = Math.min(1, b.introT/0.5);
+  const enSlide = (1-ease(intro))*130;     // enemy enters from the right
+  const meSlide = (1-ease(intro))*-130;    // player's cap enters from the left
+  const enBob = Math.sin(T*2.5)*1.5, meBob = Math.sin(T*2.5+1)*1.5;
+  let meDX=0,meDY=0,enDX=0,enDY=0;
+  if (b.lunge){ const k=Math.sin(Math.min(1,b.lunge.t/0.3)*Math.PI)*8;
+    if (b.lunge.who==='me'){ meDX=k; meDY=-k*0.5; } else { enDX=-k; enDY=k*0.5; } }
+
+  // --- enemy cap (top right) ---
+  const enHidden = b.cap && b.cap.t>=0.45;
+  if (!enHidden && (b.flashEn<=0 || (b.flashEn*20|0)%2===0)){
+    ctx.save();
+    if (b.faintEn>0) ctx.globalAlpha=Math.max(0,1-b.faintEn);
+    drawCapBig(b.enemy.species.id, 154+enSlide+enDX+sh, 24+enDY+enBob+b.faintEn*22, 44);
+    ctx.restore();
+  }
+
+  // --- capture animation (capsule toss + wiggle) ---
+  if (b.cap){
+    const c=b.cap, tgtX=176, tgtY=40;
+    if (c.t<0.45){
+      const k=c.t/0.45;
+      drawCapsuleBig(lerp(46,tgtX,k), lerp(116,tgtY,k)-Math.sin(k*Math.PI)*34, 0);
     } else {
-      drawCapBig(b.enemy.species.id, 154+sh, 24, 44);
+      const wt=c.t-0.85;
+      const settled=c.done || wt>=3*0.55;
+      const wob = (c.t>=0.85 && !settled) ? Math.sin(wt*16)*2.4 : 0;
+      drawCapsuleBig(tgtX, tgtY, wob);
+      if (c.done && c.success){
+        for (let i=0;i<4;i++){ const a=T*4+i*1.6; drawSparkle(tgtX+Math.cos(a)*12, tgtY+Math.sin(a)*9, 2, '#ffd166'); }
+      }
     }
   }
-  // capsule throw anim
-  if (b.capAnim>0) drawCapsuleIcon(170, 36);
 
-  // me (bottom left, back) — reuse sprite a bit bigger
+  // --- player's cap (bottom left, larger) ---
   if (b.flashMe<=0 || (b.flashMe*20|0)%2===0){
-    drawCapBig(b.me.species.id, 34, 86, 52);
+    ctx.save();
+    if (b.faintMe>0) ctx.globalAlpha=Math.max(0,1-b.faintMe);
+    drawCapBig(b.me.species.id, 34+meSlide+meDX, 86+meDY+meBob+b.faintMe*22, 52);
+    ctx.restore();
   }
 
-  // info boxes
+  // --- floating damage numbers ---
+  for (const p of b.popups){
+    const a=Math.max(0,1-p.t/0.9);
+    ctx.globalAlpha=a; ctx.fillStyle='#e63946';
+    ctx.font='8px "Press Start 2P", monospace'; ctx.textAlign='center';
+    ctx.fillText('-'+p.val, p.x, p.y - p.t*16);
+  }
+  ctx.globalAlpha=1; ctx.textAlign='left';
+
+  // --- info boxes ---
   drawHpBox(12, 12, b.enemy, b.enHpShown, false);
   drawHpBox(128, 78, b.me, b.meHpShown, true);
 
-  // bottom panel
+  // --- bottom panel / menus ---
   drawPanel(0,118,VW,42);
   if (dialog){ /* dialog drawn separately */ }
   else if (b.phase==='menu') drawBattleMenu();
   else if (b.phase==='fight') drawMoveMenu();
   else if (b.phase==='end'){
     ctx.fillStyle='#1b1f3a'; ctx.font='7px "Press Start 2P", monospace'; ctx.textAlign='left';
-    ctx.fillText('Tryck A...', 12, 142);
+    if ((T*2|0)%2===0) ctx.fillText('Tryck A...', 12, 142);
   }
+
+  // --- entrance flash overlay ---
+  if (b.flash>0){ ctx.fillStyle=`rgba(255,255,255,${Math.min(1,b.flash)})`; ctx.fillRect(0,0,VW,VH); }
 }
 
 function drawHpBox(x,y,cap,shown,mine){
@@ -833,13 +969,37 @@ function wrapText(text,x,y,maxW,lh){
 
 // ---------- helpers ----------
 function lerp(a,b,t){ return a+(b-a)*t; }
-function ease(t){ return t; }
+function ease(t){ return t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; }
 function clampAbs(v,max){ return Math.max(-max, Math.min(max, v)); }
+function shade(hex, amt){
+  const n = parseInt(hex.slice(1), 16);
+  let r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+  if (amt < 0){ const f=1+amt; r*=f; g*=f; b*=f; }
+  else { r+=(255-r)*amt; g+=(255-g)*amt; b+=(255-b)*amt; }
+  return `rgb(${r|0},${g|0},${b|0})`;
+}
+function drawCapsuleBig(cx, cy, wob){
+  const s=12, x=cx-s/2 + (wob||0), y=cy-s/2;
+  px(x, y, s, s/2, '#e63946');                 // red top
+  px(x, y+s/2, s, s/2, '#f4f4f4');             // white bottom
+  px(x, y+s/2-1, s, 2, '#1b1f3a');             // center band
+  px(x+1, y+1, s-4, 1, '#ff8a94');             // top highlight
+  px(x+s/2-2, y+s/2-2, 4, 4, '#cdd6f4');       // button
+  px(x+s/2-1, y+s/2-1, 2, 2, '#7a86b6');
+  ctx.strokeStyle='#1b1f3a'; ctx.lineWidth=1;
+  ctx.strokeRect(x+0.5, y+0.5, s-1, s-1);
+}
+function drawSparkle(x, y, r, c){
+  ctx.fillStyle=c;
+  ctx.fillRect(x-1, y-r, 2, r*2);
+  ctx.fillRect(x-r, y-1, r*2, 2);
+}
 
 // ---------- main loop ----------
 let last=performance.now();
 function loop(now){
   const dt=Math.min(0.05,(now-last)/1000); last=now;
+  T += dt;
   if (state==='title') updateTitle(dt);
   else if (state==='choose') updateChoose();
   else if (state==='world') updateWorld(dt);
