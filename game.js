@@ -113,16 +113,17 @@ const player = {
 
 // ---------- Map ----------
 // 0 grass, 1 tall grass, 2 tree (solid), 3 path, 4 fence (solid)
+// 5 water (solid), 6 bush (solid), 7 sign (solid), 8 flower patch (walkable)
 const M = [
  [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],
- [2,0,0,0,1,1,1,1,1,0,0,0,0,0,2],
- [2,0,0,1,1,1,1,1,1,1,0,0,2,0,2],
- [2,0,1,1,1,1,1,1,1,1,1,0,0,0,2],
- [2,0,0,1,1,1,1,1,1,1,0,0,0,0,2],
- [2,0,0,0,1,1,1,1,1,0,0,0,0,0,2],
- [2,0,0,0,0,3,3,3,0,0,0,0,0,0,2],
- [2,0,0,0,0,3,0,3,0,0,0,0,0,0,2],
- [2,0,0,0,0,3,3,3,0,0,0,2,0,0,2],
+ [2,0,0,0,1,1,1,1,1,0,0,6,6,0,2],
+ [2,0,8,1,1,1,1,1,1,1,0,6,2,0,2],
+ [2,0,0,1,1,1,1,1,1,1,1,0,0,0,2],
+ [2,0,0,0,1,1,1,1,1,0,0,0,8,0,2],
+ [2,0,5,5,0,3,3,3,0,0,0,0,0,0,2],
+ [2,0,5,5,0,3,0,3,0,0,0,0,8,0,2],
+ [2,0,0,0,0,3,0,3,3,3,3,0,0,0,2],
+ [2,0,7,0,0,3,3,3,0,0,0,2,0,0,2],
  [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],
 ];
 function tileAt(tx,ty){ if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H) return 2; return M[ty][tx]; }
@@ -131,7 +132,7 @@ function boxSolid(cx,cy){
   for(const [pxv,pyv] of pts){
     const tx=Math.floor(pxv/TILE), ty=Math.floor(pyv/TILE);
     const t=tileAt(tx,ty);
-    if(t===2||t===4) return true;
+    if(t===2||t===4||t===5||t===6||t===7) return true;
     if(npc.active && tx===npc.tx && ty===npc.ty) return true;
   }
   return false;
@@ -199,7 +200,17 @@ function updateWorld(dt){
     }
   } else player.walkPhase=0;
 }
-function tryInteract(){ if(nearNpc()) faceTrainer(); }
+function frontTile(){
+  const d=player.dir;
+  const fx=player.x+(d==='left'?-TILE:d==='right'?TILE:0);
+  const fy=player.y+(d==='up'?-TILE:d==='down'?TILE:0);
+  return { tx:Math.floor(fx/TILE), ty:Math.floor(fy/TILE) };
+}
+function tryInteract(){
+  if(nearNpc()){ faceTrainer(); return; }
+  const f=frontTile();
+  if(tileAt(f.tx,f.ty)===7) say(['ROUTE 1','Vilda kepsar gömmer sig','i det höga gräset!']);
+}
 function faceTrainer(){
   if(npc.defeated) say([`${npc.name}: Snyggt fångat!`,'Samla alla kepsarna!']);
   else say([`${npc.name}: En keps-duell!`,'Visa vad din keps går för!'], ()=>startTrainerBattle());
@@ -454,6 +465,10 @@ function drawWorld(){
   actors.push({y:player.y, fn:()=>drawPlayer()});
   actors.sort((a,b)=>a.y-b.y).forEach(a=>a.fn());
   drawBug();
+  // soft vignette for depth
+  const vg=ctx.createRadialGradient(VW/2,VH/2,VH*0.34,VW/2,VH/2,VH*0.78);
+  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(20,30,16,0.24)');
+  ctx.fillStyle=vg; ctx.fillRect(0,0,VW,VH);
   drawWorldHud();
 }
 function specks(X,Y,seed){
@@ -490,6 +505,26 @@ function drawTile(x,y,t){
     for(let i=0;i<7;i++){ const gx=X+2+i*4.2, s=sway*((i%2)?1:-1); ctx.fillRect(gx+s,Y+12,2.4,16); ctx.fillRect(gx+1+s,Y+7,1.4,7); }
     ctx.fillStyle='#6fb255';
     for(let i=0;i<6;i++){ const gx=X+4+i*4.2; ctx.fillRect(gx,Y+16,1.4,10); }
+  } else if(t===5){ // water (animated)
+    px(X,Y,TILE,TILE,'#3b6ea5');
+    ctx.fillStyle='#4f86c6';
+    for(let i=0;i<3;i++){ const ry=Y+6+i*9, off=Math.sin(T*1.5+i+x)*3; ctx.fillRect(X+3+off,ry,10,2); }
+    ctx.fillStyle='rgba(255,255,255,0.5)';
+    const gx=X+6+Math.sin(T+y)*3; ctx.fillRect(gx,Y+5,5,1); ctx.fillRect(X+18,Y+20+Math.cos(T*1.2)*2,4,1);
+    px(X,Y,TILE,2,'#2f5b88');
+  } else if(t===6){ // bush
+    shadowEl(X+16,Y+27,12,4);
+    ctx.fillStyle='#245327'; ctx.beginPath(); ctx.ellipse(X+16,Y+18,13,11,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#2f6b34'; ctx.beginPath(); ctx.ellipse(X+16,Y+17,11,9,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#3f7d42'; ctx.beginPath(); ctx.ellipse(X+13,Y+14,5,4,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#e05a6b'; ctx.fillRect(X+10,Y+18,2,2); ctx.fillRect(X+20,Y+22,2,2);
+  } else if(t===7){ // sign
+    px(X+14,Y+16,4,12,'#6b4a2a');
+    px(X+6,Y+8,20,12,'#8a5a2a'); px(X+6,Y+8,20,2,'#a86f3a');
+    ctx.fillStyle='#5a3a1c'; ctx.fillRect(X+9,Y+12,14,1.5); ctx.fillRect(X+9,Y+15,10,1.5);
+  } else if(t===8){ // flower patch
+    px(X,Y,TILE,TILE,((x+y)%2)?'#7eb85f':'#79b35a');
+    flower(X+8,Y+10,'#ffd166','#fff0b3'); flower(X+20,Y+14,'#e98fb5','#ffd0e2'); flower(X+13,Y+22,'#9bb8ff','#dce6ff');
   } else { // plain grass with flowers/tufts
     specks(X,Y,x*31+y);
     const hsh=(x*7+y*13)%9;
