@@ -472,13 +472,22 @@ function drawWorld(){
   drawWorldHud();
 }
 // Unified grass field used under every ground tile so everything blends.
+// Texture is placed on a world-aligned grid of cells so tufts tile seamlessly.
+function hash2(a,b){ let n=(a*374761393 + b*668265263)|0; n=(n^(n>>13))*1274126177; return (n>>>0); }
 function grassBase(X,Y,x,y){
-  ctx.fillStyle='#79b35a'; ctx.fillRect(X,Y,TILE,TILE);
-  for(let i=0;i<5;i++){
-    const r=(x*61+y*127+i*89);
-    const bx=X+(r%27)+2, by=Y+((r>>3)%27)+2;
-    if(i%2){ ctx.fillStyle='#7fbb61'; ctx.fillRect(bx,by,2,2); }   // soft dapple
-    else   { ctx.fillStyle='#6aa64c'; ctx.fillRect(bx,by,1,3); }   // tiny blade
+  ctx.fillStyle='#7ab35b'; ctx.fillRect(X,Y,TILE,TILE);
+  const CELL=8;
+  for(let gy=Y; gy<Y+TILE; gy+=CELL){
+    for(let gx=X; gx<X+TILE; gx+=CELL){
+      const h=hash2(gx,gy);
+      const kind=h%9;
+      if(kind>=4) continue;                 // many cells stay smooth
+      const jx=gx+1+(h%4), jy=gy+2+((h>>3)%4);
+      ctx.fillStyle = (kind===0)?'#88bf68':'#69a44b';   // a small grass tuft
+      ctx.fillRect(jx, jy, 1, 3);
+      ctx.fillRect(jx-1, jy+1, 1, 2);
+      ctx.fillRect(jx+1, jy+1, 1, 2);
+    }
   }
 }
 function drawTile(x,y,t){
@@ -497,13 +506,15 @@ function drawTile(x,y,t){
     px(X,Y,TILE,2,'#d8b988'); px(X,Y+TILE-2,TILE,2,'#b8945e');
     ctx.fillStyle='#b8945e'; ctx.fillRect(X+6,Y+10,3,3); ctx.fillRect(X+20,Y+18,3,3); ctx.fillRect(X+14,Y+5,2,2);
     ctx.fillStyle='#d8b988'; ctx.fillRect(X+7,Y+10,1,1); ctx.fillRect(X+21,Y+18,1,1);
-  } else if(t===1){ // tall grass — sits on the shared field, just taller blades
-    const sway=Math.sin(T*2 + x*0.7 + y*0.5)*2;
-    ctx.fillStyle='rgba(42,86,40,0.22)'; ctx.beginPath(); ctx.ellipse(X+16,Y+25,12,3.5,0,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#3c7a32';
-    for(let i=0;i<7;i++){ const gx=X+3+i*4, s=sway*((i%2)?1:-1); ctx.fillRect(gx+s,Y+13,2.2,14); ctx.fillRect(gx+1+s,Y+8,1.3,7); }
-    ctx.fillStyle='#57a046';
-    for(let i=0;i<6;i++){ const gx=X+5+i*4, s=sway*((i%2)?1:-1)*0.5; ctx.fillRect(gx+s,Y+15,1.3,10); }
+  } else if(t===1){ // tall grass — a tidy bushy tuft on the shared field
+    const sway=Math.sin(T*2 + x*0.7 + y*0.5)*1.5;
+    ctx.fillStyle='rgba(40,80,38,0.20)'; ctx.beginPath(); ctx.ellipse(X+16,Y+25,12,3.5,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#3f8a39'; ctx.beginPath(); ctx.ellipse(X+16,Y+20,12,8,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#4f9b45'; ctx.beginPath(); ctx.ellipse(X+16,Y+19,10,6,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#357a30';
+    for(let i=0;i<6;i++){ const gx=X+5+i*4.4, s=sway*((i%2)?1:-1); ctx.fillRect(gx+s,Y+9,2,9); }
+    ctx.fillStyle='#5aa64e';
+    for(let i=0;i<5;i++){ const gx=X+7+i*4.4, s=sway*((i%2)?1:-1)*0.6; ctx.fillRect(gx+s,Y+11,1.4,7); }
   } else if(t===5){ // water (animated)
     px(X,Y,TILE,TILE,'#3b6ea5');
     ctx.fillStyle='#4f86c6';
