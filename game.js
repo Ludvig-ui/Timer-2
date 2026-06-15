@@ -472,21 +472,27 @@ function drawWorld(){
   drawWorldHud();
 }
 // Unified grass field used under every ground tile so everything blends.
-// Texture is placed on a world-aligned grid of cells so tufts tile seamlessly.
+// Texture is placed on a world-aligned cell grid so tufts tile seamlessly.
 function hash2(a,b){ let n=(a*374761393 + b*668265263)|0; n=(n^(n>>13))*1274126177; return (n>>>0); }
+function tuft(px,py,c1,c2){            // small grass clump (~5px wide)
+  ctx.fillStyle=c1;
+  ctx.fillRect(px,py+1,1,3); ctx.fillRect(px+2,py,1,4); ctx.fillRect(px+4,py+1,1,3);
+  ctx.fillStyle=c2; ctx.fillRect(px+2,py,1,1);
+}
+function tallTuft(px,py){              // taller, denser clump for encounter grass
+  ctx.fillStyle='#3a7d34';
+  ctx.fillRect(px,py+2,2,8); ctx.fillRect(px+3,py,2,10); ctx.fillRect(px+6,py+2,2,8);
+  ctx.fillStyle='#5aa450';
+  ctx.fillRect(px+3,py,1,3); ctx.fillRect(px,py+2,1,3); ctx.fillRect(px+6,py+2,1,3);
+}
 function grassBase(X,Y,x,y){
-  ctx.fillStyle='#7ab35b'; ctx.fillRect(X,Y,TILE,TILE);
+  ctx.fillStyle='#80b885'; ctx.fillRect(X,Y,TILE,TILE);   // soft, slightly muted green
   const CELL=8;
   for(let gy=Y; gy<Y+TILE; gy+=CELL){
     for(let gx=X; gx<X+TILE; gx+=CELL){
       const h=hash2(gx,gy);
-      const kind=h%9;
-      if(kind>=4) continue;                 // many cells stay smooth
-      const jx=gx+1+(h%4), jy=gy+2+((h>>3)%4);
-      ctx.fillStyle = (kind===0)?'#88bf68':'#69a44b';   // a small grass tuft
-      ctx.fillRect(jx, jy, 1, 3);
-      ctx.fillRect(jx-1, jy+1, 1, 2);
-      ctx.fillRect(jx+1, jy+1, 1, 2);
+      if(h%10>=4) continue;                                // ~40% of cells get a tuft
+      tuft(gx+1+(h%3), gy+2+((h>>3)%3), '#5a9a67', '#9fcf9c');
     }
   }
 }
@@ -506,15 +512,10 @@ function drawTile(x,y,t){
     px(X,Y,TILE,2,'#d8b988'); px(X,Y+TILE-2,TILE,2,'#b8945e');
     ctx.fillStyle='#b8945e'; ctx.fillRect(X+6,Y+10,3,3); ctx.fillRect(X+20,Y+18,3,3); ctx.fillRect(X+14,Y+5,2,2);
     ctx.fillStyle='#d8b988'; ctx.fillRect(X+7,Y+10,1,1); ctx.fillRect(X+21,Y+18,1,1);
-  } else if(t===1){ // tall grass — a tidy bushy tuft on the shared field
-    const sway=Math.sin(T*2 + x*0.7 + y*0.5)*1.5;
-    ctx.fillStyle='rgba(40,80,38,0.20)'; ctx.beginPath(); ctx.ellipse(X+16,Y+25,12,3.5,0,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#3f8a39'; ctx.beginPath(); ctx.ellipse(X+16,Y+20,12,8,0,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#4f9b45'; ctx.beginPath(); ctx.ellipse(X+16,Y+19,10,6,0,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#357a30';
-    for(let i=0;i<6;i++){ const gx=X+5+i*4.4, s=sway*((i%2)?1:-1); ctx.fillRect(gx+s,Y+9,2,9); }
-    ctx.fillStyle='#5aa64e';
-    for(let i=0;i<5;i++){ const gx=X+7+i*4.4, s=sway*((i%2)?1:-1)*0.6; ctx.fillRect(gx+s,Y+11,1.4,7); }
+  } else if(t===1){ // tall grass — denser/taller tufts in the same style
+    const sway=Math.sin(T*2 + x*0.7 + y*0.5)*1.2;
+    const spots=[[5,15],[14,11],[22,16],[9,21],[19,21],[15,7]];
+    for(const [ox,oy] of spots) tallTuft(X+ox+sway*((ox%2)?1:-1), Y+oy);
   } else if(t===5){ // water (animated)
     px(X,Y,TILE,TILE,'#3b6ea5');
     ctx.fillStyle='#4f86c6';
