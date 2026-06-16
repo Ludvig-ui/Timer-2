@@ -76,6 +76,7 @@ st(15,H-1,DOOR);                          // main entrance
 st(14,16,RECEPTION); st(15,16,RECEPTION);
 st(3,17,SOFA); st(4,17,SOFA); st(18,16,COOLER);
 st(1,18,PLANT); st(18,18,PLANT); st(10,5,PLANT);
+st(17,2,PLANT); st(1,11,PLANT); st(8,12,PLANT); st(18,7,PLANT);  // cozy, plant-heavy
 st(2,1,SHELF); st(3,1,SHELF);
 
 // rooms for name banners
@@ -168,6 +169,10 @@ function draw(){
   for(const n of NPCS){ const cy=n.ty*TILE+16; if(cy>cam.y-40&&cy<cam.y+VH+40) actors.push({y:cy, fn:()=>drawNpc(n)}); }
   actors.sort((a,b)=>a.y-b.y).forEach(a=>a.fn());
   ctx.restore();
+  // warm cozy lighting: soft centre glow + warm darkened edges
+  const vg=ctx.createRadialGradient(VW/2,VH/2,VH*0.32,VW/2,VH/2,VH*0.82);
+  vg.addColorStop(0,'rgba(255,224,168,0.07)'); vg.addColorStop(1,'rgba(60,35,15,0.28)');
+  ctx.fillStyle=vg; ctx.fillRect(0,0,VW,VH);
   drawHud();
   if(dialog) drawDialog();
 }
@@ -186,26 +191,34 @@ function drawTitle(){
 
 // ---- tiles ----
 function drawFloorBase(X,Y,x,y){
-  ctx.fillStyle=((x+y)%2)?'#cdc8b8':'#c7c2b2'; ctx.fillRect(X,Y,TILE,TILE);
-  ctx.fillStyle='rgba(0,0,0,0.06)'; ctx.fillRect(X,Y+TILE-1,TILE,1); ctx.fillRect(X+TILE-1,Y,1,TILE);
-  ctx.fillStyle='rgba(255,255,255,0.05)'; ctx.fillRect(X,Y,TILE,1);
-  // shadow cast by a wall directly north
-  if(gt(x,y-1)===WALL||gt(x,y-1)===WINDOW){ ctx.fillStyle='rgba(0,0,0,0.18)'; ctx.fillRect(X,Y,TILE,5); }
+  // warm wood-plank floor (seamless via world coords), brick-laid
+  ctx.fillStyle='#c49a62'; ctx.fillRect(X,Y,TILE,TILE);
+  for(let py=0; py<TILE; py+=16){
+    const wy=Y+py, row=(wy/16)|0;
+    ctx.fillStyle=(row%2)?'#c79e67':'#bc9056'; ctx.fillRect(X,wy,TILE,16);
+    ctx.fillStyle='#a87f49'; ctx.fillRect(X,wy,TILE,1);                 // plank seam
+    const sx=X+(((row+Math.floor(X/TILE))%2)?16:0); ctx.fillRect(sx,wy,1,16); // staggered end seam
+    const h=hash2(X,wy); ctx.fillStyle='rgba(120,85,45,0.22)';
+    ctx.fillRect(X+3+(h%10),wy+6,7,1); ctx.fillRect(X+16+((h>>3)%8),wy+11,5,1); // grain
+  }
+  if(gt(x,y-1)===WALL||gt(x,y-1)===WINDOW){ ctx.fillStyle='rgba(60,40,20,0.18)'; ctx.fillRect(X,Y,TILE,5); }
 }
 function drawWall(X,Y){
-  px(X,Y,TILE,TILE,'#8d94a3');
-  px(X,Y,TILE,11,'#aeb6c4');                 // top face
-  px(X,Y,TILE,3,'#c6ccd8');                  // top highlight
-  px(X,Y+TILE-7,TILE,7,'#6b7280');           // front shadow
-  ctx.fillStyle='#7c8493'; ctx.fillRect(X,Y,1,TILE); ctx.fillRect(X,Y+11,TILE,1);
+  px(X,Y,TILE,TILE,'#e3d4b2');                 // cream wall
+  px(X,Y,TILE,11,'#efe4c6');                   // top face
+  px(X,Y,TILE,3,'#f7efd8');                    // top highlight
+  px(X,Y+11,TILE,1,'#cdbb93');                 // under-cap line
+  px(X,Y+TILE-7,TILE,7,'#9a7548');             // wood baseboard
+  px(X,Y+TILE-7,TILE,1,'#b08a55');
+  ctx.fillStyle='#d8c8a4'; ctx.fillRect(X,Y,1,TILE);
 }
 function drawTile(x,y){
   const X=x*TILE, Y=y*TILE, t=TT[y][x];
   if(t===WALL){ drawWall(X,Y); return; }
-  if(t===WINDOW){ drawWall(X,Y); px(X+5,Y+6,TILE-10,12,'#bfe0ef'); px(X+5,Y+6,TILE-10,3,'#dff1f8'); ctx.fillStyle='#6b7280'; ctx.fillRect(X+TILE/2-1,Y+6,2,12); ctx.fillRect(X+5,Y+11,TILE-10,2); return; }
+  if(t===WINDOW){ drawWall(X,Y); px(X+5,Y+6,TILE-10,12,'#cfe9f0'); px(X+5,Y+6,TILE-10,4,'#eaf7fb'); ctx.fillStyle='#9a7548'; ctx.fillRect(X+TILE/2-1,Y+6,2,12); ctx.fillRect(X+5,Y+11,TILE-10,2); ctx.fillRect(X+4,Y+5,TILE-8,2); return; }
   // everything else sits on floor
   drawFloorBase(X,Y,x,y);
-  if(t===CARPET){ px(X,Y,TILE,TILE,'#5b7e8c'); px(X+2,Y+2,TILE-4,TILE-4,'#6a90a0'); ctx.fillStyle='rgba(255,255,255,0.06)'; ctx.fillRect(X+2,Y+2,TILE-4,2); }
+  if(t===CARPET){ px(X,Y,TILE,TILE,'#b06048'); px(X+1,Y+1,TILE-2,TILE-2,'#c2715a'); px(X+4,Y+4,TILE-8,TILE-8,'#b96552'); ctx.fillStyle='rgba(255,240,210,0.22)'; ctx.fillRect(X+3,Y+3,TILE-6,1); ctx.fillRect(X+3,Y+3,1,TILE-6); }
   else if(t===DOOR){ px(X+4,Y+TILE-7,TILE-8,5,'#9a784a'); }
   else if(t===DESK) drawDesk(X,Y);
   else if(t===CHAIR) drawChair(X,Y);
@@ -237,8 +250,8 @@ function drawPlant(X,Y){
 }
 function drawSofa(X,Y){
   shadowEl(X+16,Y+27,14,3.5);
-  px(X+2,Y+10,28,16,'#4a5b9a'); px(X+2,Y+10,28,4,'#5566a8'); px(X+2,Y+8,5,18,'#3f4f86'); px(X+25,Y+8,5,18,'#3f4f86');
-  px(X+8,Y+14,7,8,'#5e6fb0'); px(X+17,Y+14,7,8,'#5e6fb0');
+  px(X+2,Y+10,28,16,'#6f9b6a'); px(X+2,Y+10,28,4,'#7fae79'); px(X+2,Y+8,5,18,'#5f8a5b'); px(X+25,Y+8,5,18,'#5f8a5b');
+  px(X+8,Y+14,7,8,'#86b87f'); px(X+17,Y+14,7,8,'#86b87f');
 }
 function drawMeet(X,Y){
   shadowEl(X+16,Y+24,15,5);
@@ -331,6 +344,7 @@ function wrapText(text,x,y,maxW,lh){ const words=text.split(' '); let line='',yy
 // ---- helpers ----
 function shade(hex,amt){ const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
   if(amt<0){ const f=1+amt; r*=f; g*=f; b*=f; } else { r+=(255-r)*amt; g+=(255-g)*amt; b+=(255-b)*amt; } return `rgb(${r|0},${g|0},${b|0})`; }
+function hash2(a,b){ let n=(a*374761393 + b*668265263)|0; n=(n^(n>>13))*1274126177; return (n>>>0); }
 
 // ---- loop ----
 let last=performance.now();
