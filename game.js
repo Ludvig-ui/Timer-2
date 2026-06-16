@@ -1,17 +1,16 @@
 /* ============================================================
-   CapQuest — a tiny cap-catching RPG (Pokémon-style demo)
-   World renders at 480x320; UI/battle authored in a 240x160
-   "design space" and scaled x2 so layout stays consistent.
+   HATHOUSE — office simulator (top-down, dungeon-tilemap style)
+   PLACEHOLDER FLOOR: replace with the real Hathouse floor plan.
+   Internal res 480x320, scrolling camera over a larger world.
    ============================================================ */
 (() => {
 'use strict';
 
 // ---------- Resolution ----------
-const VW = 480, VH = 320;          // real internal screen
-const DW = 240, DH = 160;          // UI/battle design space (x2 -> screen)
-const TILE = 32, MAP_W = 15, MAP_H = 10;
-const WALK_SPEED = 80;             // px/sec — free movement
-const ENC_STEP = 26, ENC_CHANCE = 0.16;
+const VW = 480, VH = 320;
+const TILE = 32, W = 30, H = 20;            // world in tiles
+const WORLD_W = W*TILE, WORLD_H = H*TILE;
+const WALK_SPEED = 84;
 const canvas = document.getElementById('screen');
 const ctx = canvas.getContext('2d');
 canvas.width = VW; canvas.height = VH;
@@ -19,553 +18,254 @@ ctx.imageSmoothingEnabled = false;
 
 const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
 if (isTouch) document.body.classList.add('touch');
-function fitCanvas() {
+function fitCanvas(){
   const maxW = window.innerWidth - 24;
   const maxH = window.innerHeight - (isTouch ? 220 : 90);
-  let s = Math.min(maxW / VW, maxH / VH);
-  if (s >= 1) s = Math.floor(s);
-  canvas.style.width = (VW * s) + 'px';
-  canvas.style.height = (VH * s) + 'px';
+  let s = Math.min(maxW/VW, maxH/VH); if (s>=1) s=Math.floor(s);
+  canvas.style.width=(VW*s)+'px'; canvas.style.height=(VH*s)+'px';
 }
 window.addEventListener('resize', fitCanvas);
 
 // ---------- Input ----------
-const keys = {};
-const KEYMAP = {
-  ArrowUp:'up', ArrowDown:'down', ArrowLeft:'left', ArrowRight:'right',
-  w:'up', s:'down', a:'left', d:'right', W:'up', S:'down', A:'left', D:'right',
-  z:'a', Z:'a', Enter:'a', ' ':'a',
-  x:'b', X:'b', Backspace:'b', Escape:'b'
-};
-const pressed = {};
-function setKey(btn, val){ if (val && !keys[btn]) pressed[btn]=true; keys[btn]=val; }
-window.addEventListener('keydown', e => { const b=KEYMAP[e.key]; if(b){ setKey(b,true); e.preventDefault(); } });
-window.addEventListener('keyup',   e => { const b=KEYMAP[e.key]; if(b){ setKey(b,false); e.preventDefault(); } });
-function bindTouch(id, btn){
-  const el = document.getElementById(id); if(!el) return;
-  const on = e => { e.preventDefault(); setKey(btn,true); };
-  const off= e => { e.preventDefault(); setKey(btn,false); };
-  el.addEventListener('touchstart',on,{passive:false});
-  el.addEventListener('touchend',off,{passive:false});
-  el.addEventListener('touchcancel',off,{passive:false});
-  el.addEventListener('mousedown',on); el.addEventListener('mouseup',off); el.addEventListener('mouseleave',off);
-}
-bindTouch('dpad-up','up'); bindTouch('dpad-down','down');
-bindTouch('dpad-left','left'); bindTouch('dpad-right','right');
+const keys={}, pressed={};
+const KEYMAP={ ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right',
+  w:'up',s:'down',a:'left',d:'right',W:'up',S:'down',A:'left',D:'right',
+  z:'a',Z:'a',Enter:'a',' ':'a', x:'b',X:'b',Backspace:'b',Escape:'b' };
+function setKey(b,v){ if(v&&!keys[b]) pressed[b]=true; keys[b]=v; }
+window.addEventListener('keydown',e=>{ const b=KEYMAP[e.key]; if(b){ setKey(b,true); e.preventDefault(); } });
+window.addEventListener('keyup',  e=>{ const b=KEYMAP[e.key]; if(b){ setKey(b,false); e.preventDefault(); } });
+function bindTouch(id,b){ const el=document.getElementById(id); if(!el) return;
+  const on=e=>{e.preventDefault();setKey(b,true);}, off=e=>{e.preventDefault();setKey(b,false);};
+  el.addEventListener('touchstart',on,{passive:false}); el.addEventListener('touchend',off,{passive:false});
+  el.addEventListener('touchcancel',off,{passive:false}); el.addEventListener('mousedown',on); el.addEventListener('mouseup',off); el.addEventListener('mouseleave',off); }
+bindTouch('dpad-up','up'); bindTouch('dpad-down','down'); bindTouch('dpad-left','left'); bindTouch('dpad-right','right');
 bindTouch('btn-a','a'); bindTouch('btn-b','b');
-function consume(btn){ if(pressed[btn]){ pressed[btn]=false; return true; } return false; }
+function consume(b){ if(pressed[b]){ pressed[b]=false; return true; } return false; }
 
-// ---------- Sprite manager (image with drawn fallback) ----------
-const SPRITES = {};
-function loadSprite(name, src){
-  const img = new Image();
-  img.onload = () => { SPRITES[name]=img; };
-  img.onerror = () => {};
-  img.src = src;
-}
-loadSprite('cap_snapback','assets/cap_snapback.png');
-loadSprite('cap_camp','assets/cap_camp.png');
-loadSprite('cap_bucket','assets/cap_bucket.png');
-loadSprite('player','assets/player.png');
-loadSprite('capsule','assets/capsule.png');
-function drawSpriteFit(name,x,y,w,h,fallback){
-  const img = SPRITES[name];
-  if (img && img.complete && img.naturalWidth) ctx.drawImage(img,x,y,w,h);
-  else if (fallback) fallback(x,y,w,h);
-}
+// ---------- Tiles ----------
+const FLOOR=0, WALL=1, DOOR=2, CARPET=3, DESK=4, CHAIR=5, PLANT=6, SOFA=7,
+      MEET=8, KITCHEN=9, SHELF=10, WINDOW=11, COOLER=12, RECEPTION=13;
+const SOLID = new Set([WALL,WINDOW,DESK,PLANT,SOFA,MEET,KITCHEN,SHELF,COOLER,RECEPTION]);
 
-// ---------- Species / moves ----------
-const TYPES = { Street:'#e76f51', Outdoor:'#2a9d8f', Classic:'#e9c46a' };
-function typeMultiplier(atk,def){
-  if (atk===def) return 1;
-  const wins = { Street:'Outdoor', Outdoor:'Classic', Classic:'Street' };
-  return wins[atk]===def ? 1.5 : 0.66;
-}
-const SPECIES = {
-  snapback:{ id:'snapback', name:'SNAPBACK', sprite:'cap_snapback', type:'Street',
-    color:'#26416b', accent:'#ffffff', base:{hp:32,atk:12,def:8,spd:11}, moves:['flatbrim','taunt'] },
-  camp:{ id:'camp', name:'5-PANEL', sprite:'cap_camp', type:'Outdoor',
-    color:'#5f6f3a', accent:'#cdd6a0', base:{hp:30,atk:10,def:11,spd:9}, moves:['trailgust','taunt'] },
-  bucket:{ id:'bucket', name:'BUCKET', sprite:'cap_bucket', type:'Classic',
-    color:'#c9b187', accent:'#8a7250', base:{hp:36,atk:9,def:12,spd:7}, moves:['brimslam','taunt'] }
-};
-const MOVES = {
-  flatbrim:{ name:'FLAT BRIM', type:'Street',  power:11, acc:0.95 },
-  trailgust:{name:'TRAIL GUST',type:'Outdoor', power:11, acc:0.95 },
-  brimslam:{ name:'BRIM SLAM', type:'Classic', power:12, acc:0.9  },
-  taunt:{    name:'STYLE FLEX',type:'none',    power:6,  acc:1.0  }
-};
-function statAt(base,level){ return Math.floor(base + base*(level-1)*0.18); }
-function makeCap(speciesId,level){
-  const sp=SPECIES[speciesId];
-  const maxHp=statAt(sp.base.hp,level)+level*2;
-  return { species:sp, level, maxHp, hp:maxHp,
-    atk:statAt(sp.base.atk,level), def:statAt(sp.base.def,level), spd:statAt(sp.base.spd,level),
-    xp:0, xpNext:level*12, moves:sp.moves.map(m=>MOVES[m]) };
-}
+// ---------- Build placeholder floor ----------
+const TT=[]; for(let y=0;y<H;y++){ const r=[]; for(let x=0;x<W;x++) r.push(FLOOR); TT.push(r); }
+function st(x,y,v){ if(x>=0&&y>=0&&x<W&&y<H) TT[y][x]=v; }
+function gt(x,y){ return (x>=0&&y>=0&&x<W&&y<H)?TT[y][x]:WALL; }
+function hwall(x1,x2,y){ for(let x=x1;x<=x2;x++) st(x,y,WALL); }
+function vwall(y1,y2,x){ for(let y=y1;y<=y2;y++) st(x,y,WALL); }
+function fillRect2(x1,y1,x2,y2,v){ for(let y=y1;y<=y2;y++) for(let x=x1;x<=x2;x++) st(x,y,v); }
 
-// ---------- Player (free pixel position; x,y = feet point) ----------
-const player = {
-  x: 7*TILE+16, y: 7*TILE+18,
-  dir:'down', moving:false, walkPhase:0, grassDist:0,
-  party:[], capsule:8, caught:{}
-};
+// outer walls
+hwall(0,W-1,0); hwall(0,W-1,H-1); vwall(0,H-1,0); vwall(0,H-1,W-1);
+// windows on outer walls
+st(8,0,WINDOW); st(14,0,WINDOW); st(0,5,WINDOW); st(0,10,WINDOW); st(0,14,WINDOW);
+// Meeting Room A (top-right)
+vwall(0,7,20); hwall(20,W-1,7); st(20,3,DOOR);
+fillRect2(21,1,28,6,CARPET); st(24,3,MEET); st(23,3,CHAIR); st(25,3,CHAIR); st(24,2,CHAIR); st(24,4,CHAIR); st(28,1,PLANT);
+// Meeting Room B (right, middle)
+vwall(8,13,20); hwall(20,W-1,13); st(20,10,DOOR);
+fillRect2(21,8,28,12,CARPET); st(24,10,MEET); st(23,10,CHAIR); st(25,10,CHAIR); st(24,9,CHAIR); st(24,11,CHAIR); st(21,8,PLANT);
+// Kitchen (bottom-right)
+vwall(14,18,20); st(20,16,DOOR);
+hwall(21,28,14,KITCHEN); st(24,17,MEET); st(23,17,CHAIR); st(25,17,CHAIR); st(28,18,PLANT);
+for(let x=21;x<=28;x++) st(x,14,KITCHEN);
+// Open-plan desks (left/centre)
+for(const r of [3,7,11]){ for(const c of [3,6,9,12,15]){ st(c,r,DESK); st(c,r+1,CHAIR); } }
+// Reception + lounge (bottom-centre, by the entrance)
+st(15,H-1,DOOR);                          // main entrance
+st(14,16,RECEPTION); st(15,16,RECEPTION);
+st(3,17,SOFA); st(4,17,SOFA); st(18,16,COOLER);
+st(1,18,PLANT); st(18,18,PLANT); st(10,5,PLANT);
+st(2,1,SHELF); st(3,1,SHELF);
 
-// ---------- Map ----------
-// 0 grass, 1 tall grass, 2 tree (solid), 3 path, 4 fence (solid)
-// 5 water (solid), 6 bush (solid), 7 sign (solid), 8 flower patch (walkable)
-const M = [
- [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],
- [2,0,0,0,1,1,1,1,1,0,0,6,6,0,2],
- [2,0,8,1,1,1,1,1,1,1,0,6,2,0,2],
- [2,0,0,1,1,1,1,1,1,1,1,0,0,0,2],
- [2,0,0,0,1,1,1,1,1,0,0,0,8,0,2],
- [2,0,5,5,0,3,3,3,0,0,0,0,0,0,2],
- [2,0,5,5,0,3,0,3,0,0,0,0,8,0,2],
- [2,0,0,0,0,3,0,3,3,3,3,0,0,0,2],
- [2,0,7,0,0,3,3,3,0,0,0,2,0,0,2],
- [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2],
+// rooms for name banners
+const ROOMS=[
+  {name:'Mötesrum A', x:20,y:0,w:10,h:8},
+  {name:'Mötesrum B', x:20,y:8,w:10,h:6},
+  {name:'Kök',        x:20,y:13,w:10,h:7},
+  {name:'Reception',  x:10,y:14,w:10,h:6},
 ];
-function tileAt(tx,ty){ if(tx<0||ty<0||tx>=MAP_W||ty>=MAP_H) return 2; return M[ty][tx]; }
+function roomNameAt(tx,ty){ for(const r of ROOMS){ if(tx>=r.x&&tx<r.x+r.w&&ty>=r.y&&ty<r.y+r.h) return r.name; } return 'Kontorslandskap'; }
+
+// ---------- NPC colleagues ----------
+const NPCS=[
+  {tx:3, ty:4,  dir:'down', shirt:'#c0504d', cap:'#3a3a3a', line:'Hej! Mycket att göra idag.'},
+  {tx:9, ty:8,  dir:'down', shirt:'#4f81bd', cap:'#6b4a2a', line:'Kaffe? Köket är där borta.'},
+  {tx:16,ty:11, dir:'left', shirt:'#9bbb59', cap:'#2a2a2a', line:'Mötet börjar snart i Mötesrum A.'},
+];
+function npcAtTile(tx,ty){ return NPCS.find(n=>n.tx===tx&&n.ty===ty); }
+
+// ---------- Player ----------
+const player = { x:15*TILE+16, y:18*TILE+18, dir:'up', moving:false, walkPhase:0 };
 function boxSolid(cx,cy){
   const pts=[[cx-9,cy-6],[cx+9,cy-6],[cx-9,cy+3],[cx+9,cy+3]];
-  for(const [pxv,pyv] of pts){
-    const tx=Math.floor(pxv/TILE), ty=Math.floor(pyv/TILE);
-    const t=tileAt(tx,ty);
-    if(t===2||t===4||t===5||t===6||t===7) return true;
-    if(npc.active && tx===npc.tx && ty===npc.ty) return true;
-  }
+  for(const [pxv,pyv] of pts){ const tx=Math.floor(pxv/TILE), ty=Math.floor(pyv/TILE);
+    if(SOLID.has(gt(tx,ty))) return true; if(npcAtTile(tx,ty)) return true; }
   return false;
 }
-function feetTile(){ return tileAt(Math.floor(player.x/TILE), Math.floor(player.y/TILE)); }
+function frontTile(){ const d=player.dir;
+  return { tx:Math.floor((player.x+(d==='left'?-TILE:d==='right'?TILE:0))/TILE),
+           ty:Math.floor((player.y+(d==='up'?-TILE:d==='down'?TILE:0))/TILE) }; }
 
-// ---------- NPC trainer ----------
-const npc = { active:true, defeated:false, tx:10, ty:7, name:'KEPS-KENT', capId:'camp', capLevel:6 };
-function npcCenter(){ return { x:npc.tx*TILE+16, y:npc.ty*TILE+16 }; }
-function nearNpc(){ if(!npc.active) return false; const c=npcCenter(); return Math.hypot(player.x-c.x, player.y-c.y) < TILE*1.15; }
+// ---------- State ----------
+let state='title', dialog=null, T=0, titleBlink=0;
+let roomName='Kontorslandskap', bannerT=0;
+const cam={x:0,y:0};
+function say(lines,onDone){ dialog={ lines:Array.isArray(lines)?lines:[lines], i:0, char:0, onDone }; }
 
-// ============================================================
-//  STATE MACHINE
-// ============================================================
-let state='title';     // title|choose|world|battle
-let battle=null;
-let dialog=null;
-let T=0;               // animation clock
-function say(lines,onDone){ dialog={ lines:Array.isArray(lines)?lines:[lines], i:0, char:0, t:0, onDone }; }
+function updateTitle(dt){ titleBlink+=dt; if(consume('a')){ state='world'; setRoom(roomNameAt(15,18)); } }
+function setRoom(n){ if(n!==roomName){ roomName=n; bannerT=2.4; } }
 
-let titleBlink=0;
-function updateTitle(dt){ titleBlink+=dt; if(consume('a')){ state='choose'; chooseIdx=0; } }
-
-let chooseIdx=0;
-const STARTERS=['snapback','camp','bucket'];
-function updateChoose(){
-  if(consume('left'))  chooseIdx=(chooseIdx+2)%3;
-  if(consume('right')) chooseIdx=(chooseIdx+1)%3;
-  if(consume('a')){
-    const id=STARTERS[chooseIdx];
-    player.party=[ makeCap(id,5) ];
-    player.caught[id]=true;
-    state='world';
-    say([`Du valde ${SPECIES[id].name}!`,'Gå i det höga gräset för','att hitta vilda kepsar.']);
-  }
-}
-
-// ============================================================
-//  OVERWORLD — free movement
-// ============================================================
 function updateWorld(dt){
+  if(bannerT>0) bannerT-=dt;
   if(dialog){ updateDialog(); return; }
   let dx=0,dy=0;
   if(keys.left)dx--; if(keys.right)dx++; if(keys.up)dy--; if(keys.down)dy++;
   if(consume('a')) tryInteract();
   if(dx&&dy){ dx*=0.7071; dy*=0.7071; }
-
-  // walking into an undefeated trainer starts the duel
-  if((dx||dy) && npc.active && !npc.defeated){
-    const aheadTx=Math.floor((player.x+dx*10)/TILE), aheadTy=Math.floor((player.y+dy*10)/TILE);
-    if(aheadTx===npc.tx && aheadTy===npc.ty){ faceTrainer(); return; }
-  }
-
   const dist=WALK_SPEED*dt; let moved=0;
   if(dx){ const nx=player.x+dx*dist; if(!boxSolid(nx,player.y)){ moved+=Math.abs(nx-player.x); player.x=nx; } }
   if(dy){ const ny=player.y+dy*dist; if(!boxSolid(player.x,ny)){ moved+=Math.abs(ny-player.y); player.y=ny; } }
   if(dx<0)player.dir='left'; else if(dx>0)player.dir='right'; else if(dy<0)player.dir='up'; else if(dy>0)player.dir='down';
-
-  player.moving = moved>0.02;
-  if(player.moving){
-    player.walkPhase += moved/7;
-    if(feetTile()===1){
-      player.grassDist += moved;
-      if(player.grassDist>=ENC_STEP){ player.grassDist=0; if(Math.random()<ENC_CHANCE){ startWildBattle(); return; } }
-    }
-  } else player.walkPhase=0;
-}
-function frontTile(){
-  const d=player.dir;
-  const fx=player.x+(d==='left'?-TILE:d==='right'?TILE:0);
-  const fy=player.y+(d==='up'?-TILE:d==='down'?TILE:0);
-  return { tx:Math.floor(fx/TILE), ty:Math.floor(fy/TILE) };
+  player.moving=moved>0.02;
+  if(player.moving) player.walkPhase+=moved/7; else player.walkPhase=0;
+  setRoom(roomNameAt(Math.floor(player.x/TILE), Math.floor(player.y/TILE)));
 }
 function tryInteract(){
-  if(nearNpc()){ faceTrainer(); return; }
   const f=frontTile();
-  if(tileAt(f.tx,f.ty)===7) say(['ROUTE 1','Vilda kepsar gömmer sig','i det höga gräset!']);
+  const n=npcAtTile(f.tx,f.ty); if(n){ say(n.line); return; }
+  const t=gt(f.tx,f.ty);
+  const L={ [DESK]:'Ett skrivbord — fullt av jobb.', [KITCHEN]:'Köket. Dags för fika?',
+    [MEET]:'Ett mötesbord.', [PLANT]:'En fin kontorsväxt.', [RECEPTION]:'Receptionen. Välkommen till HATHOUSE!',
+    [SHELF]:'En hylla full av pärmar.', [COOLER]:'Vattenautomat. *glugg glugg*', [SOFA]:'En skön soffa.' };
+  if(L[t]) say(L[t]);
 }
-function faceTrainer(){
-  if(npc.defeated) say([`${npc.name}: Snyggt fångat!`,'Samla alla kepsarna!']);
-  else say([`${npc.name}: En keps-duell!`,'Visa vad din keps går för!'], ()=>startTrainerBattle());
-}
-
-// ============================================================
-//  BATTLE (logic unchanged; coords live in 240x160 design space)
-// ============================================================
-function startWildBattle(){
-  const pool=['snapback','camp','bucket'];
-  const id=pool[(Math.random()*pool.length)|0];
-  const lvl=3+(Math.random()*4|0);
-  beginBattle(makeCap(id,lvl),true,null);
-  say([`En vild ${SPECIES[id].name} dök upp!`]);
-}
-function startTrainerBattle(){
-  beginBattle(makeCap(npc.capId,npc.capLevel),false,npc.name);
-  say([`${npc.name} skickar ut`,`${SPECIES[npc.capId].name}!`]);
-}
-function activeCap(){ return player.party.find(c=>c.hp>0)||player.party[0]; }
-function beginBattle(enemy,isWild,trainerName){
-  state='battle';
-  battle={ enemy,isWild,trainerName, me:activeCap(), phase:'intro',
-    menuIdx:0, moveIdx:0, shake:0, flashMe:0, flashEn:0,
-    introT:0, flash:1, lunge:null, popups:[], faintEn:0, faintMe:0, cap:null,
-    result:null, enemyMaxHp:enemy.maxHp, meHpShown:enemy?0:0, enHpShown:0 };
-  battle.meHpShown=battle.me.hp; battle.enHpShown=enemy.hp;
-}
-const BMENU=['STRID','FÅNGA','BYT','FLY'];
-function updateBattle(dt){
-  const b=battle;
-  if(b.shake>0) b.shake=Math.max(0,b.shake-dt*60);
-  if(b.flashMe>0) b.flashMe-=dt; if(b.flashEn>0) b.flashEn-=dt;
-  b.introT+=dt;
-  if(b.flash>0) b.flash-=dt*2.2;
-  if(b.lunge){ b.lunge.t+=dt; if(b.lunge.t>0.3) b.lunge=null; }
-  for(const p of b.popups) p.t+=dt;
-  if(b.popups.length) b.popups=b.popups.filter(p=>p.t<0.9);
-  if(b.enemy.hp<=0 && !b.cap) b.faintEn=Math.min(1,b.faintEn+dt*2);
-  if(b.me.hp<=0) b.faintMe=Math.min(1,b.faintMe+dt*2);
-  b.meHpShown+=clampAbs(b.me.hp-b.meHpShown,dt*40);
-  b.enHpShown+=clampAbs(b.enemy.hp-b.enHpShown,dt*40);
-
-  if(dialog){ updateDialog(); return; }
-
-  switch(b.phase){
-    case 'intro': b.phase='menu'; break;
-    case 'capture': {
-      const c=b.cap; c.t+=dt;
-      if(c.t>=0.85){
-        const wig=Math.floor((c.t-0.85)/0.55);
-        if(wig>=3 && !c.done){
-          c.done=true;
-          if(c.success){
-            const caught=b.enemy;
-            player.party.push(makeCap(caught.species.id,caught.level));
-            const isNew=!player.caught[caught.species.id];
-            player.caught[caught.species.id]=true;
-            b.result='caught'; b.phase='end';
-            const lines=[`${caught.species.name} fångades!`];
-            if(isNew) lines.push('Ny post i CAPDEX!');
-            say(lines);
-          } else {
-            b.cap=null;
-            say([`${b.enemy.species.name} slet sig loss!`], ()=>{ b.phase='resolve'; runActions([['en',enemyMove()]],0); });
-          }
-        }
-      }
-      break;
-    }
-    case 'menu': {
-      if(consume('left')  && b.menuIdx%2===1) b.menuIdx--;
-      if(consume('right') && b.menuIdx%2===0) b.menuIdx++;
-      if(consume('up')    && b.menuIdx>=2)    b.menuIdx-=2;
-      if(consume('down')  && b.menuIdx<2)     b.menuIdx+=2;
-      if(consume('a')){
-        if(b.menuIdx===0){ b.phase='fight'; b.moveIdx=0; }
-        else if(b.menuIdx===1) tryCatch();
-        else if(b.menuIdx===2) trySwitch();
-        else if(b.menuIdx===3) tryRun();
-      }
-      break;
-    }
-    case 'fight': {
-      const n=b.me.moves.length;
-      if(consume('up')   && b.moveIdx>=2) b.moveIdx-=2;
-      if(consume('down') && b.moveIdx+2<n) b.moveIdx+=2;
-      if(consume('left') && b.moveIdx%2===1) b.moveIdx--;
-      if(consume('right')&& b.moveIdx%2===0 && b.moveIdx+1<n) b.moveIdx++;
-      if(consume('b')) b.phase='menu';
-      if(consume('a')) doTurn(b.me.moves[b.moveIdx]);
-      break;
-    }
-    case 'end': if(consume('a')) finishBattle(); break;
-  }
-}
-function enemyMove(){ const b=battle; return b.enemy.moves[(Math.random()*b.enemy.moves.length)|0]; }
-function calcDamage(attacker,defender,move){
-  if(move.power<=0) return {dmg:0,mult:1};
-  const mult=move.type==='none'?1:typeMultiplier(move.type,defender.species.type);
-  const base=(attacker.atk*move.power)/(defender.def+18);
-  return { dmg:Math.max(1,Math.floor(base*mult*(0.85+Math.random()*0.3))), mult };
-}
-function doTurn(myMove){
-  const b=battle; b.phase='resolve';
-  const enMove=enemyMove();
-  const order = b.me.spd>=b.enemy.spd ? [['me',myMove],['en',enMove]] : [['en',enMove],['me',myMove]];
-  runActions(order,0);
-}
-function runActions(order,i){
-  const b=battle;
-  if(i>=order.length){ if(b.me.hp<=0||b.enemy.hp<=0) checkBattleEnd(); else b.phase='menu'; return; }
-  const [who,move]=order[i];
-  const atk=who==='me'?b.me:b.enemy, def=who==='me'?b.enemy:b.me;
-  if(atk.hp<=0){ runActions(order,i+1); return; }
-  const name=who==='me'?atk.species.name:(b.isWild?'Vild ':'Fiendens ')+atk.species.name;
-  if(Math.random()>move.acc){ say([`${name} använde ${move.name}!`,'Men det missade!'], ()=>runActions(order,i+1)); return; }
-  const {dmg,mult}=calcDamage(atk,def,move);
-  def.hp=Math.max(0,def.hp-dmg);
-  b.lunge={who,t:0};
-  b.popups.push(who==='me'?{x:176,y:42,val:dmg,t:0}:{x:60,y:96,val:dmg,t:0});
-  if(who==='me'){ b.flashEn=0.25; b.shake=6; } else { b.flashMe=0.25; b.shake=6; }
-  const eff=mult>1?' Träffsäkert!':(mult<1?' Föga effektivt...':'');
-  const lines=[`${name} använde ${move.name}!`]; if(eff) lines.push(eff.trim());
-  say(lines, ()=>{ if(def.hp<=0) checkBattleEnd(); else runActions(order,i+1); });
-}
-function checkBattleEnd(){
-  const b=battle;
-  if(b.enemy.hp<=0){
-    const xp=b.enemy.level*6+4; gainXp(b.me,xp); b.result='win';
-    const lines=[`${b.isWild?'Vild ':''}${b.enemy.species.name} föll!`,`${b.me.species.name} fick ${xp} EP.`];
-    if(b._leveled) lines.push(`${b.me.species.name} gick upp till nivå ${b.me.level}!`);
-    b.phase='end'; say(lines);
-  } else if(b.me.hp<=0){
-    const next=player.party.find(c=>c.hp>0);
-    if(next){ b.me=next; b.meHpShown=next.hp; say([`${b.me.species.name}, din tur!`], ()=>b.phase='menu'); }
-    else { b.result='lose'; b.phase='end'; say(['Alla dina kepsar svimmade...','Du skyndar hem och vårdar dem.']); }
-  } else b.phase='menu';
-}
-function gainXp(cap,amount){
-  battle._leveled=false; cap.xp+=amount;
-  while(cap.xp>=cap.xpNext && cap.level<50){
-    cap.xp-=cap.xpNext; cap.level++; cap.xpNext=cap.level*12;
-    const sp=cap.species, newMax=statAt(sp.base.hp,cap.level)+cap.level*2;
-    cap.hp+=(newMax-cap.maxHp); cap.maxHp=newMax;
-    cap.atk=statAt(sp.base.atk,cap.level); cap.def=statAt(sp.base.def,cap.level); cap.spd=statAt(sp.base.spd,cap.level);
-    battle._leveled=true;
-  }
-}
-function tryCatch(){
-  const b=battle;
-  if(!b.isWild){ say(['Man kan inte fånga','en annan tränares keps!']); return; }
-  if(player.capsule<=0){ say(['Du har inga CAPSULES kvar!']); return; }
-  player.capsule--; b.phase='resolve';
-  const hpFrac=b.enemy.hp/b.enemyMaxHp;
-  const chance=Math.min(0.92,0.45+(1-hpFrac)*0.5);
-  say(['Du kastar en CAPSULE!'], ()=>{ b.phase='capture'; b.cap={ t:0, success:Math.random()<chance, done:false }; });
-}
-function trySwitch(){
-  const b=battle;
-  const others=player.party.filter(c=>c!==b.me && c.hp>0);
-  if(others.length===0){ say(['Du har ingen annan','frisk keps!']); return; }
-  b.me=others[0]; b.meHpShown=b.me.hp;
-  say([`Kom igen, ${b.me.species.name}!`], ()=>{ b.phase='resolve'; runActions([['en',enemyMove()]],0); });
-}
-function tryRun(){
-  const b=battle;
-  if(!b.isWild){ say(['Man kan inte fly från','en keps-duell!']); return; }
-  if(Math.random()<0.7){ b.result='run'; b.phase='end'; say(['Du kom undan!']); }
-  else say(['Du kom inte undan!'], ()=>{ b.phase='resolve'; runActions([['en',enemyMove()]],0); });
-}
-function finishBattle(){
-  const b=battle;
-  if(b.result==='win' && !b.isWild && !npc.defeated){ npc.defeated=true; state='world'; healParty(); say([`Du besegrade ${npc.name}!`,'Dina kepsar vilade upp sig.']); battle=null; return; }
-  if(b.result==='lose') healParty();
-  state='world'; battle=null;
-}
-function healParty(){ player.party.forEach(c=>c.hp=c.maxHp); }
-
-// ============================================================
-//  DIALOG
-// ============================================================
 function updateDialog(){
-  const d=dialog, line=d.lines[d.i]; d.t+=1;
-  if(d.char<line.length){
-    d.char+=2; if(d.char>line.length) d.char=line.length;
-    if(consume('a')) d.char=line.length;
-  } else if(consume('a')||consume('b')){
-    d.i++;
-    if(d.i>=d.lines.length){ const cb=d.onDone; dialog=null; if(cb) cb(); }
-    else d.char=0;
-  }
+  const d=dialog, line=d.lines[d.i];
+  if(d.char<line.length){ d.char+=2; if(d.char>line.length)d.char=line.length; if(consume('a'))d.char=line.length; }
+  else if(consume('a')||consume('b')){ d.i++; if(d.i>=d.lines.length){ const cb=d.onDone; dialog=null; if(cb)cb(); } else d.char=0; }
 }
 
 // ============================================================
-//  RENDERING
+//  RENDER
 // ============================================================
 function px(x,y,w,h,c){ ctx.fillStyle=c; ctx.fillRect(x,y,w,h); }
+function ell(cx,cy,rx,ry,c){ ctx.fillStyle=c; ctx.beginPath(); ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2); ctx.fill(); }
 function shadowEl(cx,cy,rx,ry){ ctx.fillStyle='rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2); ctx.fill(); }
 
 function draw(){
   ctx.setTransform(1,0,0,1,0,0);
-  if(state==='title'){ scaledUI(drawTitle); return; }
-  if(state==='choose'){ scaledUI(drawChoose); return; }
-  if(state==='battle'){ scaledUI(drawBattle); if(dialog) scaledUI(drawDialog); return; }
-  drawWorld();
-  if(dialog) scaledUI(drawDialog);
+  if(state==='title'){ drawTitle(); return; }
+  // camera
+  cam.x=Math.round(Math.max(0,Math.min(WORLD_W-VW, player.x-VW/2)));
+  cam.y=Math.round(Math.max(0,Math.min(WORLD_H-VH, player.y-VH/2)));
+  ctx.save(); ctx.translate(-cam.x,-cam.y);
+  const x0=Math.max(0,(cam.x/TILE|0)), x1=Math.min(W-1,((cam.x+VW)/TILE|0));
+  const y0=Math.max(0,(cam.y/TILE|0)), y1=Math.min(H-1,((cam.y+VH)/TILE|0));
+  for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++) drawTile(x,y);
+  // actors (player + npcs) depth-sorted
+  const actors=[{y:player.y, fn:drawPlayer}];
+  for(const n of NPCS){ const cy=n.ty*TILE+16; if(cy>cam.y-40&&cy<cam.y+VH+40) actors.push({y:cy, fn:()=>drawNpc(n)}); }
+  actors.sort((a,b)=>a.y-b.y).forEach(a=>a.fn());
+  ctx.restore();
+  drawHud();
+  if(dialog) drawDialog();
 }
-function scaledUI(fn){ ctx.save(); ctx.scale(VW/DW, VH/DH); fn(); ctx.restore(); }
 
-// ---- Title (design space) ----
+// ---- title ----
 function drawTitle(){
-  ctx.fillStyle='#9ad07a'; ctx.fillRect(0,0,DW,DH);
-  for(let i=0;i<8;i++){ const x=((i*53)%240), y=20+((i*37)%80); drawCapMini(x,y,['#26416b','#5f6f3a','#c9b187'][i%3]); }
-  px(20,52,200,42,'#1b1f3a'); px(22,54,196,38,'#2b3566');
-  ctx.fillStyle='#ffd166'; ctx.font='16px "Press Start 2P", monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillText('CapQuest',120,70);
-  ctx.fillStyle='#cdd6f4'; ctx.font='6px "Press Start 2P", monospace';
-  ctx.fillText('FÅNGA · DUELLERA · SAMLA',120,84);
-  if((titleBlink*2|0)%2===0){ ctx.fillStyle='#fff'; ctx.font='7px "Press Start 2P", monospace'; ctx.fillText('TRYCK A FÖR ATT BÖRJA',120,120); }
+  px(0,0,VW,VH,'#20242e');
+  for(let i=0;i<40;i++){ const x=(i*53)%VW, y=((i*97)%VH); px(x,y,2,2,'#2b303c'); }
+  px(70,110,340,64,'#11141c'); px(74,114,332,56,'#2f3647');
+  ctx.fillStyle='#ffd166'; ctx.font='28px "Press Start 2P", monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('HATHOUSE',240,140);
+  ctx.fillStyle='#cdd6f4'; ctx.font='10px "Press Start 2P", monospace'; ctx.fillText('KONTORSSIMULATOR',240,162);
+  if((titleBlink*2|0)%2===0){ ctx.fillStyle='#fff'; ctx.font='10px "Press Start 2P", monospace'; ctx.fillText('TRYCK A',240,220); }
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
 }
-function drawCapMini(x,y,color){ px(x+1,y+3,12,4,color); px(x+1,y+6,16,2,'#1b1f3a'); px(x+4,y+1,7,3,color); }
 
-// ---- Choose (design space) ----
-function drawChoose(){
-  ctx.fillStyle='#2b3566'; ctx.fillRect(0,0,DW,DH);
-  ctx.fillStyle='#fff'; ctx.font='8px "Press Start 2P", monospace'; ctx.textAlign='center';
-  ctx.fillText('VÄLJ DIN FÖRSTA KEPS',120,22);
-  STARTERS.forEach((id,i)=>{
-    const sp=SPECIES[id], x=40+i*66, y=64, sel=i===chooseIdx;
-    if(sel) px(x-26,y-30,52,62,'#ffd166');
-    px(x-23,y-27,46,56,'#1b1f3a');
-    const bob=sel?Math.sin(T*4)*1.6:0;
-    drawCapBig(id,x-16,y-22+bob,32);
-    ctx.fillStyle=sel?'#ffd166':'#9aa3c4'; ctx.font='6px "Press Start 2P", monospace';
-    ctx.fillText(sp.name,x,y+24);
-    ctx.fillStyle=TYPES[sp.type]; ctx.fillText(sp.type,x,y+40);
-  });
-  ctx.fillStyle='#cdd6f4'; ctx.font='6px "Press Start 2P", monospace';
-  ctx.fillText('◀ ▶ välj   A bekräfta',120,132);
-  ctx.textAlign='left';
+// ---- tiles ----
+function drawFloorBase(X,Y,x,y){
+  ctx.fillStyle=((x+y)%2)?'#cdc8b8':'#c7c2b2'; ctx.fillRect(X,Y,TILE,TILE);
+  ctx.fillStyle='rgba(0,0,0,0.06)'; ctx.fillRect(X,Y+TILE-1,TILE,1); ctx.fillRect(X+TILE-1,Y,1,TILE);
+  ctx.fillStyle='rgba(255,255,255,0.05)'; ctx.fillRect(X,Y,TILE,1);
+  // shadow cast by a wall directly north
+  if(gt(x,y-1)===WALL||gt(x,y-1)===WINDOW){ ctx.fillStyle='rgba(0,0,0,0.18)'; ctx.fillRect(X,Y,TILE,5); }
 }
-
-// ---- World (real 480x320) ----
-function drawWorld(){
-  ctx.fillStyle='#79b35a'; ctx.fillRect(0,0,VW,VH);
-  for(let y=0;y<MAP_H;y++) for(let x=0;x<MAP_W;x++) drawTile(x,y,M[y][x]);
-  // draw actors sorted by feet-Y for simple depth
-  const actors=[];
-  if(npc.active){ const c=npcCenter(); actors.push({y:c.y, fn:()=>drawTrainer(c.x,c.y)}); }
-  actors.push({y:player.y, fn:()=>drawPlayer()});
-  actors.sort((a,b)=>a.y-b.y).forEach(a=>a.fn());
-  drawBug();
-  // soft vignette for depth
-  const vg=ctx.createRadialGradient(VW/2,VH/2,VH*0.34,VW/2,VH/2,VH*0.78);
-  vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(20,30,16,0.24)');
-  ctx.fillStyle=vg; ctx.fillRect(0,0,VW,VH);
-  drawWorldHud();
+function drawWall(X,Y){
+  px(X,Y,TILE,TILE,'#8d94a3');
+  px(X,Y,TILE,11,'#aeb6c4');                 // top face
+  px(X,Y,TILE,3,'#c6ccd8');                  // top highlight
+  px(X,Y+TILE-7,TILE,7,'#6b7280');           // front shadow
+  ctx.fillStyle='#7c8493'; ctx.fillRect(X,Y,1,TILE); ctx.fillRect(X,Y+11,TILE,1);
 }
-// Unified grass field used under every ground tile so everything blends.
-// Texture is placed on a world-aligned cell grid so tufts tile seamlessly.
-function hash2(a,b){ let n=(a*374761393 + b*668265263)|0; n=(n^(n>>13))*1274126177; return (n>>>0); }
-function tuft(px,py,c1,c2){            // small grass clump (~5px wide)
-  ctx.fillStyle=c1;
-  ctx.fillRect(px,py+1,1,3); ctx.fillRect(px+2,py,1,4); ctx.fillRect(px+4,py+1,1,3);
-  ctx.fillStyle=c2; ctx.fillRect(px+2,py,1,1);
-}
-function tallTuft(px,py){              // taller, denser clump for encounter grass
-  ctx.fillStyle='#3a7d34';
-  ctx.fillRect(px,py+2,2,8); ctx.fillRect(px+3,py,2,10); ctx.fillRect(px+6,py+2,2,8);
-  ctx.fillStyle='#5aa450';
-  ctx.fillRect(px+3,py,1,3); ctx.fillRect(px,py+2,1,3); ctx.fillRect(px+6,py+2,1,3);
-}
-function grassBase(X,Y,x,y){
-  ctx.fillStyle='#80b885'; ctx.fillRect(X,Y,TILE,TILE);   // soft, slightly muted green
-  const CELL=8;
-  for(let gy=Y; gy<Y+TILE; gy+=CELL){
-    for(let gx=X; gx<X+TILE; gx+=CELL){
-      const h=hash2(gx,gy);
-      if(h%10>=4) continue;                                // ~40% of cells get a tuft
-      tuft(gx+1+(h%3), gy+2+((h>>3)%3), '#5a9a67', '#9fcf9c');
-    }
-  }
-}
-function drawTile(x,y,t){
-  const X=x*TILE, Y=y*TILE;
-  grassBase(X,Y,x,y);                 // same base for all ground tiles
-  if(t===2){ // tree
-    shadowEl(X+16,Y+28,13,4.5);
-    px(X+13,Y+16,6,13,'#6b4a2a'); px(X+13,Y+16,2,13,'#7d5733'); // trunk
-    // layered canopy
-    ctx.fillStyle='#245327'; ctx.beginPath(); ctx.ellipse(X+16,Y+13,14,12,0,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#2f6b34'; ctx.beginPath(); ctx.ellipse(X+16,Y+12,12.5,10.5,0,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#3f7d42'; ctx.beginPath(); ctx.ellipse(X+15,Y+10,9,7.5,0,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#58a352'; ctx.beginPath(); ctx.ellipse(X+12,Y+8,4.5,3.5,0,0,Math.PI*2); ctx.fill();
-  } else if(t===3){ // path
-    px(X,Y,TILE,TILE,'#caa771');
-    px(X,Y,TILE,2,'#d8b988'); px(X,Y+TILE-2,TILE,2,'#b8945e');
-    ctx.fillStyle='#b8945e'; ctx.fillRect(X+6,Y+10,3,3); ctx.fillRect(X+20,Y+18,3,3); ctx.fillRect(X+14,Y+5,2,2);
-    ctx.fillStyle='#d8b988'; ctx.fillRect(X+7,Y+10,1,1); ctx.fillRect(X+21,Y+18,1,1);
-  } else if(t===1){ // tall grass — denser/taller tufts in the same style
-    const sway=Math.sin(T*2 + x*0.7 + y*0.5)*1.2;
-    const spots=[[5,15],[14,11],[22,16],[9,21],[19,21],[15,7]];
-    for(const [ox,oy] of spots) tallTuft(X+ox+sway*((ox%2)?1:-1), Y+oy);
-  } else if(t===5){ // water (animated)
-    px(X,Y,TILE,TILE,'#3b6ea5');
-    ctx.fillStyle='#4f86c6';
-    for(let i=0;i<3;i++){ const ry=Y+6+i*9, off=Math.sin(T*1.5+i+x)*3; ctx.fillRect(X+3+off,ry,10,2); }
-    ctx.fillStyle='rgba(255,255,255,0.5)';
-    const gx=X+6+Math.sin(T+y)*3; ctx.fillRect(gx,Y+5,5,1); ctx.fillRect(X+18,Y+20+Math.cos(T*1.2)*2,4,1);
-    px(X,Y,TILE,2,'#2f5b88');
-  } else if(t===6){ // bush
-    shadowEl(X+16,Y+27,12,4);
-    ctx.fillStyle='#245327'; ctx.beginPath(); ctx.ellipse(X+16,Y+18,13,11,0,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#2f6b34'; ctx.beginPath(); ctx.ellipse(X+16,Y+17,11,9,0,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#3f7d42'; ctx.beginPath(); ctx.ellipse(X+13,Y+14,5,4,0,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#e05a6b'; ctx.fillRect(X+10,Y+18,2,2); ctx.fillRect(X+20,Y+22,2,2);
-  } else if(t===7){ // sign
-    px(X+14,Y+16,4,12,'#6b4a2a');
-    px(X+6,Y+8,20,12,'#8a5a2a'); px(X+6,Y+8,20,2,'#a86f3a');
-    ctx.fillStyle='#5a3a1c'; ctx.fillRect(X+9,Y+12,14,1.5); ctx.fillRect(X+9,Y+15,10,1.5);
-  } else if(t===8){ // flower patch (on shared field)
-    flower(X+8,Y+10,'#ffd166','#fff0b3'); flower(X+20,Y+14,'#e98fb5','#ffd0e2'); flower(X+13,Y+22,'#9bb8ff','#dce6ff');
-  } else { // plain grass with occasional flower
-    const hsh=(x*7+y*13)%9;
-    if(hsh===0){ flower(X+11,Y+12,'#ffd166','#fff0b3'); }
-    else if(hsh===3){ flower(X+20,Y+19,'#e98fb5','#ffd0e2'); }
-    else if(hsh===6){ flower(X+9,Y+21,'#9bb8ff','#dce6ff'); }
-  }
-}
-function flower(cx,cy,c,hi){
-  ctx.fillStyle='#3f7d42'; ctx.fillRect(cx,cy+3,1,4);
-  ctx.fillStyle=c; ctx.fillRect(cx-2,cy,2,2); ctx.fillRect(cx+1,cy,2,2); ctx.fillRect(cx-1,cy-2,3,2); ctx.fillRect(cx-1,cy+2,3,2);
-  ctx.fillStyle=hi; ctx.fillRect(cx,cy,1,1);
-}
-function drawWorldHud(){
-  px(6,6,196,30,'rgba(20,24,46,0.85)');
-  drawCapsuleBig(22,21);
-  ctx.fillStyle='#fff'; ctx.font='12px "Press Start 2P", monospace'; ctx.textAlign='left';
-  ctx.fillText('x'+player.capsule,34,25);
-  const dex=Object.keys(player.caught).length;
-  ctx.fillStyle='#ffd166'; ctx.fillText('CAPDEX '+dex+'/3',90,25);
-}
-function drawBug(){
-  const bx=24+(Math.sin(T*0.6)*0.5+0.5)*420;
-  const by=44+Math.sin(T*1.9)*14+(Math.cos(T*0.4)*0.5+0.5)*60;
-  const f=(T*12|0)%2;
-  ctx.fillStyle='#3a2a1a'; ctx.fillRect(bx,by,2,3);
-  ctx.fillStyle='#ffd166';
-  if(f){ ctx.fillRect(bx-4,by-2,4,4); ctx.fillRect(bx+2,by-2,4,4); }
-  else { ctx.fillRect(bx-4,by,4,4); ctx.fillRect(bx+2,by,4,4); }
+function drawTile(x,y){
+  const X=x*TILE, Y=y*TILE, t=TT[y][x];
+  if(t===WALL){ drawWall(X,Y); return; }
+  if(t===WINDOW){ drawWall(X,Y); px(X+5,Y+6,TILE-10,12,'#bfe0ef'); px(X+5,Y+6,TILE-10,3,'#dff1f8'); ctx.fillStyle='#6b7280'; ctx.fillRect(X+TILE/2-1,Y+6,2,12); ctx.fillRect(X+5,Y+11,TILE-10,2); return; }
+  // everything else sits on floor
+  drawFloorBase(X,Y,x,y);
+  if(t===CARPET){ px(X,Y,TILE,TILE,'#5b7e8c'); px(X+2,Y+2,TILE-4,TILE-4,'#6a90a0'); ctx.fillStyle='rgba(255,255,255,0.06)'; ctx.fillRect(X+2,Y+2,TILE-4,2); }
+  else if(t===DOOR){ px(X+4,Y+TILE-7,TILE-8,5,'#9a784a'); }
+  else if(t===DESK) drawDesk(X,Y);
+  else if(t===CHAIR) drawChair(X,Y);
+  else if(t===PLANT) drawPlant(X,Y);
+  else if(t===SOFA) drawSofa(X,Y);
+  else if(t===MEET) drawMeet(X,Y);
+  else if(t===KITCHEN) drawKitchen(X,Y);
+  else if(t===SHELF) drawShelf(X,Y);
+  else if(t===COOLER) drawCooler(X,Y);
+  else if(t===RECEPTION) drawReception(X,Y);
 }
 
-// ---- Trainer sprite (16-unit art; scaled x2 in overworld) ----
+// ---- furniture ----
+function drawDesk(X,Y){
+  shadowEl(X+16,Y+27,13,3.5);
+  px(X+3,Y+9,26,17,'#b07f4a'); px(X+3,Y+9,26,3,'#c79a63'); px(X+3,Y+23,26,3,'#8a5f33');
+  px(X+9,Y+4,14,9,'#23262f'); px(X+10,Y+5,12,7,'#4a86c6'); px(X+10,Y+5,5,3,'#7fb0e0'); px(X+15,Y+13,2,2,'#444');
+  px(X+10,Y+19,13,4,'#dfe2e8'); px(X+11,Y+20,11,1,'#b9bcc4');
+}
+function drawChair(X,Y){
+  shadowEl(X+16,Y+24,8,3);
+  px(X+10,Y+8,12,3,'#2b303c');          // backrest
+  ell(X+16,Y+17,8,6,'#39414f'); ell(X+16,Y+16,6.5,4.5,'#4a5566');
+}
+function drawPlant(X,Y){
+  shadowEl(X+16,Y+27,9,3.5);
+  px(X+11,Y+19,10,8,'#a4632e'); px(X+11,Y+19,10,2,'#bb7638'); px(X+11,Y+25,10,2,'#8a5226');
+  ell(X+16,Y+12,9,8,'#2f7d44'); ell(X+12,Y+9,5,5,'#3f9a55'); ell(X+20,Y+11,4,4,'#3f9a55'); ell(X+15,Y+7,3,3,'#56b06b');
+}
+function drawSofa(X,Y){
+  shadowEl(X+16,Y+27,14,3.5);
+  px(X+2,Y+10,28,16,'#4a5b9a'); px(X+2,Y+10,28,4,'#5566a8'); px(X+2,Y+8,5,18,'#3f4f86'); px(X+25,Y+8,5,18,'#3f4f86');
+  px(X+8,Y+14,7,8,'#5e6fb0'); px(X+17,Y+14,7,8,'#5e6fb0');
+}
+function drawMeet(X,Y){
+  shadowEl(X+16,Y+24,15,5);
+  ell(X+16,Y+16,15,11,'#b07f4a'); ell(X+16,Y+15,13.5,9.5,'#c08e57'); ell(X+12,Y+12,5,3,'#cfa06a');
+}
+function drawKitchen(X,Y){
+  px(X,Y+6,TILE,14,'#cfd3da'); px(X,Y+6,TILE,3,'#e2e5ea');     // counter top
+  px(X,Y+18,TILE,10,'#9aa0aa'); ctx.fillStyle='#7e8088'; ctx.fillRect(X+6,Y+20,8,6); ctx.fillRect(X+18,Y+20,8,6); // cabinets
+  px(X+10,Y+9,12,7,'#8b8f98'); px(X+11,Y+10,10,5,'#b9c0c8');   // sink
+}
+function drawShelf(X,Y){
+  px(X+3,Y+3,26,24,'#7a5230'); px(X+5,Y+5,22,20,'#9a6a3e');
+  const cols=['#c0504d','#4f81bd','#9bbb59','#f0a830','#8064a2'];
+  for(let r=0;r<3;r++){ for(let i=0;i<5;i++){ px(X+6+i*4,Y+6+r*7,3,5,cols[(i+r)%5]); } px(X+5,Y+11+r*7,22,1,'#6b4a2a'); }
+}
+function drawCooler(X,Y){
+  shadowEl(X+16,Y+27,7,3);
+  px(X+11,Y+12,10,15,'#e9edf2'); px(X+11,Y+12,10,3,'#cdd3da');
+  px(X+12,Y+4,8,9,'#9fd0e6'); px(X+13,Y+5,6,7,'#bfe3f2'); px(X+14,Y+18,4,3,'#7fb0e0');
+}
+function drawReception(X,Y){
+  shadowEl(X+16,Y+27,15,3.5);
+  px(X,Y+10,TILE,16,'#6b4a2a'); px(X,Y+10,TILE,4,'#8a5f33'); px(X,Y+8,TILE,3,'#d8dadf'); // counter + top
+  px(X+6,Y+14,20,6,'#cdd0d6');
+}
+
+// ---- characters (16-unit art scaled x2) ----
 function drawTrainerSprite(x,y,cap,body,dir,frame){
   const R=(ax,ay,aw,ah,c)=>{ ctx.fillStyle=c; ctx.fillRect(x+ax,y+ay,aw,ah); };
   const skin='#f1c27d', skinD='#d9a35f', shoe='#26324a', outline='#1b2236';
@@ -596,161 +296,49 @@ function drawPlayer(){
   const bob=(!player.moving && Math.sin(T*3)<0)?-1:0;
   const wf=player.moving?(Math.floor(player.walkPhase)%4):-1;
   ctx.save(); ctx.translate(sx-16, sy-28+bob*2); ctx.scale(2,2);
-  drawTrainerSprite(0,0,'#e63946','#2f5fa0',player.dir,wf); ctx.restore();
+  drawTrainerSprite(0,0,'#e0a040','#2f5fa0',player.dir,wf); ctx.restore();
 }
-function drawTrainer(cx,cy){
-  shadowEl(cx,cy+8,12,4.5);
-  const bob=(Math.sin(T*2.4)<0)?-1:0;
-  ctx.save(); ctx.translate(cx-16, cy-24+bob*2); ctx.scale(2,2);
-  drawTrainerSprite(0,0,'#4f5f2f','#8a5a2a','down',-1); ctx.restore();
-  if(!npc.defeated && (T*2|0)%2===0){ ctx.fillStyle='#ffd166'; ctx.font='16px "Press Start 2P", monospace'; ctx.textAlign='center'; ctx.fillText('!',cx,cy-22); ctx.textAlign='left'; }
-}
-
-// ---- Cap creatures (16-unit art with outline + shading) ----
-function capFallback(id){
-  return (x,y,w,h)=>{
-    const sp=SPECIES[id], u=w/16, outline='#141d33';
-    const R=(ax,ay,aw,ah,c)=>{ ctx.fillStyle=c; ctx.fillRect(x+ax*u,y+ay*u,aw*u,ah*u); };
-    const RB=(ax,ay,aw,ah,c)=>{ ctx.fillStyle=outline; ctx.fillRect(x+(ax-0.45)*u,y+(ay-0.45)*u,(aw+0.9)*u,(ah+0.9)*u); ctx.fillStyle=c; ctx.fillRect(x+ax*u,y+ay*u,aw*u,ah*u); };
-    const dark=shade(sp.color,-0.3), darker=shade(sp.color,-0.5), light=shade(sp.color,0.25);
-    ctx.fillStyle='rgba(0,0,0,0.16)'; ctx.beginPath(); ctx.ellipse(x+8*u,y+15.2*u,5.5*u,1.6*u,0,0,Math.PI*2); ctx.fill();
-    RB(5,13.6,2.4,2,'#3a2c1c'); RB(8.2,13.6,2.4,2,'#3a2c1c');
-    let ey;
-    if(id==='snapback'){
-      ey=6;
-      RB(2,10,12.5,2,dark); R(2,11.6,13,1.2,darker);
-      RB(4,2.6,8,7.4,sp.color); R(4,2.6,8,2,light); R(4,8.6,8,1.4,dark);
-      R(5,4.6,6,4,sp.accent); R(5,4.6,6,1,'#dfe6ef');
-      R(7.6,1.7,0.9,1.1,light); R(7.7,2.6,0.6,7,dark);
-    } else if(id==='camp'){
-      ey=6.6;
-      RB(3,10,10,2,dark); R(4,11.4,8.5,1.1,darker);
-      RB(4,3.6,8,6.6,sp.color); R(4,3.6,8,2,light); R(4,9.2,8,1,dark);
-      R(5,6,6,3,sp.accent); R(7.7,3.6,0.6,6.4,dark); R(5.6,4,0.5,6,dark); R(9.9,4,0.5,6,dark);
-    } else {
-      ey=7.2;
-      RB(4,3.6,8,6.4,sp.color); R(4,3.6,8,2,light); R(4,6,8,0.5,dark); R(4,7.6,8,0.5,dark);
-      RB(1.4,9.2,13.2,2,dark); R(1.2,10.8,13.6,2,sp.color); R(1.2,12.4,13.6,1.2,darker);
-    }
-    R(5.4,ey,2.1,2.4,'#fff'); R(8.6,ey,2.1,2.4,'#fff');
-    R(6.0,ey+0.5,1.1,1.5,'#1b1f3a'); R(9.2,ey+0.5,1.1,1.5,'#1b1f3a');
-    R(6.0,ey+0.4,0.5,0.5,'#fff'); R(9.2,ey+0.4,0.5,0.5,'#fff');
-    R(5.0,ey+2.5,1.2,0.9,'#ff9bb0'); R(9.9,ey+2.5,1.2,0.9,'#ff9bb0');
-  };
-}
-function drawCapBig(id,x,y,size){ drawSpriteFit(SPECIES[id].sprite,x,y,size,size,capFallback(id)); }
-
-// ---- Battle (design space) ----
-function drawBattle(){
-  const b=battle, W=DW, H=DH;
-  const sh=b.shake>0?(Math.random()*b.shake-b.shake/2):0;
-  const g=ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#bfe3f0'); g.addColorStop(0.55,'#dcefcf'); g.addColorStop(1,'#e9f3d6');
-  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
-  ctx.fillStyle='#cfe39f'; ctx.beginPath(); ctx.moveTo(0,98); ctx.lineTo(W,72); ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill();
-  ctx.fillStyle='rgba(255,255,255,0.75)'; cloud(38+Math.sin(T*0.2)*4,18,9); cloud(150,12,7); cloud(212+Math.sin(T*0.15)*3,26,8);
-  ctx.fillStyle='#a9cd7a'; ctx.beginPath(); ctx.ellipse(176,60,42,11,0,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='#9bc36b'; ctx.beginPath(); ctx.ellipse(60,122,48,13,0,0,Math.PI*2); ctx.fill();
-
-  const intro=Math.min(1,b.introT/0.5), enSlide=(1-ease(intro))*130, meSlide=(1-ease(intro))*-130;
-  const enBob=Math.sin(T*2.5)*1.5, meBob=Math.sin(T*2.5+1)*1.5;
-  let meDX=0,meDY=0,enDX=0,enDY=0;
-  if(b.lunge){ const k=Math.sin(Math.min(1,b.lunge.t/0.3)*Math.PI)*8; if(b.lunge.who==='me'){ meDX=k; meDY=-k*0.5; } else { enDX=-k; enDY=k*0.5; } }
-
-  const enHidden=b.cap && b.cap.t>=0.45;
-  if(!enHidden && (b.flashEn<=0||(b.flashEn*20|0)%2===0)){
-    ctx.save(); if(b.faintEn>0) ctx.globalAlpha=Math.max(0,1-b.faintEn);
-    drawCapBig(b.enemy.species.id,154+enSlide+enDX+sh,24+enDY+enBob+b.faintEn*22,44); ctx.restore();
-  }
-  if(b.cap){
-    const c=b.cap, tgtX=176, tgtY=40;
-    if(c.t<0.45){ const k=c.t/0.45; drawCapsuleBig(lerp(46,tgtX,k), lerp(116,tgtY,k)-Math.sin(k*Math.PI)*34, 0); }
-    else { const wt=c.t-0.85, settled=c.done||wt>=3*0.55; const wob=(c.t>=0.85&&!settled)?Math.sin(wt*16)*2.4:0; drawCapsuleBig(tgtX,tgtY,wob);
-      if(c.done&&c.success){ for(let i=0;i<4;i++){ const a=T*4+i*1.6; drawSparkle(tgtX+Math.cos(a)*12,tgtY+Math.sin(a)*9,2,'#ffd166'); } } }
-  }
-  if(b.flashMe<=0||(b.flashMe*20|0)%2===0){
-    ctx.save(); if(b.faintMe>0) ctx.globalAlpha=Math.max(0,1-b.faintMe);
-    drawCapBig(b.me.species.id,34+meSlide+meDX,86+meDY+meBob+b.faintMe*22,52); ctx.restore();
-  }
-  if(b.flashEn>0) hitSpark(176,42);
-  if(b.flashMe>0) hitSpark(60,96);
-  for(const p of b.popups){ const a=Math.max(0,1-p.t/0.9); ctx.globalAlpha=a; ctx.fillStyle='#e63946'; ctx.font='8px "Press Start 2P", monospace'; ctx.textAlign='center'; ctx.fillText('-'+p.val,p.x,p.y-p.t*16); }
-  ctx.globalAlpha=1; ctx.textAlign='left';
-
-  drawHpBox(12,12,b.enemy,b.enHpShown,false);
-  drawHpBox(128,78,b.me,b.meHpShown,true);
-  drawPanel(0,118,W,42);
-  if(dialog){}
-  else if(b.phase==='menu') drawBattleMenu();
-  else if(b.phase==='fight') drawMoveMenu();
-  else if(b.phase==='end'){ ctx.fillStyle='#1b1f3a'; ctx.font='7px "Press Start 2P", monospace'; ctx.textAlign='left'; if((T*2|0)%2===0) ctx.fillText('Tryck A...',12,142); }
-
-  if(b.flash>0){ ctx.fillStyle=`rgba(255,255,255,${Math.min(1,b.flash)})`; ctx.fillRect(0,0,W,H); }
-}
-function drawHpBox(x,y,cap,shown,mine){
-  drawPanel(x,y,100,26);
-  ctx.fillStyle='#1b1f3a'; ctx.font='6px "Press Start 2P", monospace'; ctx.textAlign='left';
-  ctx.fillText(cap.species.name,x+6,y+9); ctx.fillText('N'+cap.level,x+78,y+9);
-  px(x+6,y+14,80,5,'#1b1f3a'); px(x+7,y+15,78,3,'#5a5a5a');
-  const frac=Math.max(0,shown/cap.maxHp), col=frac>0.5?'#3ddc84':frac>0.2?'#ffd166':'#e63946';
-  px(x+7,y+15,(78*frac)|0,3,col);
-  if(mine){ ctx.fillStyle='#1b1f3a'; ctx.fillText(Math.ceil(shown)+'/'+cap.maxHp,x+44,y+25); }
-}
-function drawPanel(x,y,w,h){ px(x,y,w,h,'#f7f7e8'); ctx.strokeStyle='#1b1f3a'; ctx.lineWidth=2; ctx.strokeRect(x+1,y+1,w-2,h-2); ctx.strokeStyle='#7a86b6'; ctx.strokeRect(x+3,y+3,w-6,h-6); }
-function drawBattleMenu(){
-  const b=battle; ctx.font='7px "Press Start 2P", monospace'; ctx.textAlign='left';
-  BMENU.forEach((label,i)=>{ const cx=130+(i%2)*54, cy=134+((i/2)|0)*16; ctx.fillStyle=i===b.menuIdx?'#e63946':'#1b1f3a'; if(i===b.menuIdx) ctx.fillText('▶',cx-9,cy); ctx.fillText(label,cx,cy); });
-  ctx.fillStyle='#1b1f3a'; ctx.fillText('Vad ska du',10,134); ctx.fillText('göra?',10,148);
-}
-function drawMoveMenu(){
-  const b=battle; ctx.font='6px "Press Start 2P", monospace'; ctx.textAlign='left';
-  b.me.moves.forEach((m,i)=>{ const cx=14+(i%2)*112, cy=134+((i/2)|0)*16; ctx.fillStyle=i===b.moveIdx?'#e63946':'#1b1f3a'; if(i===b.moveIdx) ctx.fillText('▶',cx-8,cy); ctx.fillText(m.name,cx,cy); });
-  const m=b.me.moves[b.moveIdx]; ctx.fillStyle=TYPES[m.type]||'#888'; ctx.fillText('TYP: '+(m.type==='none'?'STYLE':m.type.toUpperCase()),150,150);
+function drawNpc(n){
+  const cx=n.tx*TILE+16, cy=n.ty*TILE+18;
+  shadowEl(cx,cy+4,12,4.5);
+  const bob=(Math.sin(T*2.2+n.tx)<0)?-1:0;
+  ctx.save(); ctx.translate(cx-16, cy-28+bob*2); ctx.scale(2,2);
+  drawTrainerSprite(0,0,n.cap,n.shirt,n.dir,-1); ctx.restore();
 }
 
-// ---- Dialog (design space) ----
+// ---- HUD / dialog ----
+function drawHud(){
+  px(6,6,150,22,'rgba(20,24,46,0.82)');
+  ctx.fillStyle='#ffd166'; ctx.font='8px "Press Start 2P", monospace'; ctx.textAlign='left';
+  ctx.fillText('HATHOUSE',12,20);
+  ctx.fillStyle='#9aa3c4'; ctx.fillText('VÅN 1',104,20);
+  if(bannerT>0){ const a=Math.min(1,bannerT); ctx.globalAlpha=a;
+    px(VW/2-90,34,180,24,'rgba(20,24,46,0.85)');
+    ctx.fillStyle='#fff'; ctx.font='9px "Press Start 2P", monospace'; ctx.textAlign='center';
+    ctx.fillText(roomName.toUpperCase(),VW/2,50); ctx.globalAlpha=1; ctx.textAlign='left'; }
+}
 function drawDialog(){
   const d=dialog;
-  drawPanel(4,118,DW-8,38);
-  ctx.fillStyle='#1b1f3a'; ctx.font='7px "Press Start 2P", monospace'; ctx.textAlign='left';
-  wrapText(d.lines[d.i].slice(0,d.char),14,134,DW-28,12);
-  if(d.char>=d.lines[d.i].length && (T*3|0)%2===0) ctx.fillText('▾',DW-18,150);
+  px(12,236,VW-24,72,'#f7f7e8'); ctx.strokeStyle='#1b1f3a'; ctx.lineWidth=3; ctx.strokeRect(15,239,VW-30,66);
+  ctx.strokeStyle='#7a86b6'; ctx.strokeRect(19,243,VW-38,58);
+  ctx.fillStyle='#1b1f3a'; ctx.font='10px "Press Start 2P", monospace'; ctx.textAlign='left';
+  wrapText(d.lines[d.i].slice(0,d.char),30,266,VW-60,18);
+  if(d.char>=d.lines[d.i].length && (T*3|0)%2===0) ctx.fillText('▾',VW-34,298);
 }
-function wrapText(text,x,y,maxW,lh){
-  const words=text.split(' '); let line='', yy=y;
-  for(const w of words){ const test=line?line+' '+w:w; if(ctx.measureText(test).width>maxW && line){ ctx.fillText(line,x,yy); line=w; yy+=lh; } else line=test; }
-  ctx.fillText(line,x,yy);
-}
+function wrapText(text,x,y,maxW,lh){ const words=text.split(' '); let line='',yy=y;
+  for(const w of words){ const test=line?line+' '+w:w; if(ctx.measureText(test).width>maxW&&line){ ctx.fillText(line,x,yy); line=w; yy+=lh; } else line=test; } ctx.fillText(line,x,yy); }
 
-// ---- shared draw helpers ----
-function drawCapsuleBig(cx,cy,wob){
-  const s=12, x=cx-s/2+(wob||0), y=cy-s/2;
-  px(x,y,s,s/2,'#e63946'); px(x,y+s/2,s,s/2,'#f4f4f4'); px(x,y+s/2-1,s,2,'#1b1f3a');
-  px(x+1,y+1,s-4,1,'#ff8a94'); px(x+s/2-2,y+s/2-2,4,4,'#cdd6f4'); px(x+s/2-1,y+s/2-1,2,2,'#7a86b6');
-  ctx.strokeStyle='#1b1f3a'; ctx.lineWidth=1; ctx.strokeRect(x+0.5,y+0.5,s-1,s-1);
-}
-function drawSparkle(x,y,r,c){ ctx.fillStyle=c; ctx.fillRect(x-1,y-r,2,r*2); ctx.fillRect(x-r,y-1,r*2,2); }
-function hitSpark(cx,cy){ for(let i=0;i<5;i++){ const a=i/5*Math.PI*2+T*10; drawSparkle(cx+Math.cos(a)*6,cy+Math.sin(a)*6,3,'#fff'); } drawSparkle(cx,cy,4,'#ffd166'); }
-function cloud(cx,cy,r){ ctx.beginPath(); ctx.ellipse(cx,cy,r,r*0.6,0,0,Math.PI*2); ctx.ellipse(cx+r,cy+2,r*0.8,r*0.5,0,0,Math.PI*2); ctx.ellipse(cx-r,cy+2,r*0.7,r*0.45,0,0,Math.PI*2); ctx.fill(); }
+// ---- helpers ----
+function shade(hex,amt){ const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  if(amt<0){ const f=1+amt; r*=f; g*=f; b*=f; } else { r+=(255-r)*amt; g+=(255-g)*amt; b+=(255-b)*amt; } return `rgb(${r|0},${g|0},${b|0})`; }
 
-// ---------- math helpers ----------
-function lerp(a,b,t){ return a+(b-a)*t; }
-function ease(t){ return t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2; }
-function clampAbs(v,max){ return Math.max(-max,Math.min(max,v)); }
-function shade(hex,amt){ const n=parseInt(hex.slice(1),16); let r=(n>>16)&255,g=(n>>8)&255,b=n&255; if(amt<0){ const f=1+amt; r*=f; g*=f; b*=f; } else { r+=(255-r)*amt; g+=(255-g)*amt; b+=(255-b)*amt; } return `rgb(${r|0},${g|0},${b|0})`; }
-
-// ---------- main loop ----------
+// ---- loop ----
 let last=performance.now();
-function loop(now){
-  const dt=Math.min(0.05,(now-last)/1000); last=now; T+=dt;
-  if(state==='title') updateTitle(dt);
-  else if(state==='choose') updateChoose();
-  else if(state==='world') updateWorld(dt);
-  else if(state==='battle') updateBattle(dt);
+function loop(now){ const dt=Math.min(0.05,(now-last)/1000); last=now; T+=dt;
+  if(state==='title') updateTitle(dt); else if(state==='world') updateWorld(dt);
   for(const k in pressed) pressed[k]=false;
-  draw();
-  requestAnimationFrame(loop);
+  draw(); requestAnimationFrame(loop);
 }
-fitCanvas();
-requestAnimationFrame(loop);
+fitCanvas(); requestAnimationFrame(loop);
 
 })();
