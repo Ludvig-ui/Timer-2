@@ -57,12 +57,11 @@ function wallKey(x,y){
   return'C';
 }
 // rooms in the central core: {x,y,w,h, floor, door:[side,off], label}
-const FLOOR_TAN=[1,4], FLOOR_GRAY=[9,4];
 const ROOMS=[
   {x:6,y:8, w:5,h:4, door:['L',2], label:'FOKUS'},
-  {x:6,y:11,w:5,h:4, door:['R',2], label:'MÖTE B'},
-  {x:6,y:14,w:5,h:4, floor:FLOOR_GRAY, door:['L',2], label:'WC'},
-  {x:6,y:17,w:5,h:4, door:['R',2], label:'MÖTE'},
+  {x:6,y:11,w:5,h:4, door:['R',2], label:'MOTE B'},
+  {x:6,y:14,w:5,h:4, floor:'#c9cdd3', door:['L',2], label:'WC'},
+  {x:6,y:17,w:5,h:4, door:['R',2], label:'MOTE'},
   {x:6,y:20,w:5,h:6, door:['L',4], label:'KONFERENS'},
 ];
 function isRoomDoor(rm,xx,yy){const [s,o]=rm.door;
@@ -74,29 +73,25 @@ function roomWallKey(rm,xx,yy){const l=xx===rm.x,r=xx===rm.x+rm.w-1,t=yy===rm.y,
 
 // objects: [scol,srow,wt,ht, tx,ty]
 const OBJ=[
-  // top lounge (orange podium area, top of the loop)
-  [7,12,2,1,6,5],[7,12,2,1,8,5],[16,8,1,2,6,4],[16,8,1,2,9,4],
-  // focus room
-  [5,10,1,1,7,9],[5,10,1,1,8,9],
-  // meeting B
-  [5,10,1,1,7,12],[5,10,1,1,8,12],
-  // WC fixtures
-  [9,9,1,1,7,15],[9,9,1,1,8,15],
-  // meeting
-  [5,10,1,1,7,18],[5,10,1,1,8,18],
-  // konferens
-  [5,10,1,1,7,22],[5,10,1,1,8,22],[5,10,1,1,7,23],[5,10,1,1,8,23],
-  // open office desks (left x2-3, right x12-13)
-  [5,10,1,1,2,9],[5,10,1,1,3,9],[5,10,1,1,2,12],[5,10,1,1,3,12],
-  [5,10,1,1,2,15],[5,10,1,1,3,15],[5,10,1,1,2,18],[5,10,1,1,3,18],[5,10,1,1,2,21],[5,10,1,1,3,21],
-  [5,10,1,1,12,9],[5,10,1,1,13,9],[5,10,1,1,12,12],[5,10,1,1,13,12],
-  [5,10,1,1,12,15],[5,10,1,1,13,15],[5,10,1,1,12,18],[5,10,1,1,13,18],[5,10,1,1,12,21],[5,10,1,1,13,21],
-  // bookshelves on the outer walls
-  [7,10,1,1,1,8],[7,10,1,1,1,20],[7,10,1,1,14,8],[7,10,1,1,14,20],
-  // plants along the sides
-  [16,8,1,2,4,10],[16,8,1,2,11,10],[16,8,1,2,4,16],[16,8,1,2,11,16],[16,8,1,2,4,22],[16,8,1,2,11,22],
+  // top lounge (top of the loop)
+  [7,12,2,1,6,5],[7,12,2,1,8,5],[16,8,1,2,5,4],[16,8,1,2,10,4],
+  // central rooms' furniture
+  [5,10,1,1,7,9],[5,10,1,1,8,9],          // focus
+  [5,10,1,1,7,12],[5,10,1,1,8,12],        // meeting B
+  [9,9,1,1,7,15],[9,9,1,1,8,15],          // WC fixtures
+  [5,10,1,1,7,18],[5,10,1,1,8,18],        // meeting
+  [5,10,1,1,7,22],[5,10,1,1,8,22],[5,10,1,1,7,23],[5,10,1,1,8,23], // konferens
+  // open-office desks ALONG the side walls (x1 left, x14 right)
+  [5,10,1,1,1,3],[5,10,1,1,14,3],[5,10,1,1,1,5],[5,10,1,1,14,5],
+  [5,10,1,1,1,7],[5,10,1,1,14,7],[5,10,1,1,1,9],[5,10,1,1,14,9],
+  [5,10,1,1,1,11],[5,10,1,1,14,11],[5,10,1,1,1,13],[5,10,1,1,14,13],
+  [5,10,1,1,1,15],[5,10,1,1,14,15],[5,10,1,1,1,17],[5,10,1,1,14,17],
+  [5,10,1,1,1,19],[5,10,1,1,14,19],[5,10,1,1,1,21],[5,10,1,1,14,21],
+  [5,10,1,1,1,23],[5,10,1,1,14,23],[5,10,1,1,1,25],[5,10,1,1,14,25],
+  // plants in the side corridors
+  [16,8,1,2,4,8],[16,8,1,2,11,8],[16,8,1,2,4,17],[16,8,1,2,11,17],[16,8,1,2,4,26],[16,8,1,2,11,26],
   // reception / entrance (bottom)
-  [9,13,2,1,7,31],[16,8,1,2,6,30],[7,12,2,1,10,31],[16,8,1,2,2,31],[4,12,3,1,1,33],
+  [9,13,2,1,7,31],[16,8,1,2,6,30],[7,12,2,1,10,31],[4,12,3,1,1,33],
   // entrance door (bottom wall)
   [12,10,1,1,8,35],
 ];
@@ -193,6 +188,24 @@ function updateWorld(dt){
 function px(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(x,y,w,h);}
 function clamp(v,a,b){return v<a?a:v>b?b:v;}
 
+// --- look (matches the concept render) ---
+const COL={carpetA:'#44484f',carpetB:'#3e424a',glass:'#bfe3f0',pillar:'#363a42',
+  roomW:'#6e747e',roomWd:'#4e535c',roomF:'#4a4e56',wcF:'#c9cdd3'};
+function drawShell(x0,x1,y0,y1,camX,camY){
+  for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){
+    if(x<0||y<0||x>=W||y>=H) continue;
+    const sx=x*T-camX, sy=y*T-camY;
+    px(sx,sy,T,T,(x+y)&1?COL.carpetB:COL.carpetA);          // carpet checker
+    const border=(x===0||y===0||x===W-1||y===H-1);
+    if(!border) continue;
+    const vert=(x===0||x===W-1), horiz=(y===0||y===H-1);
+    const pillar=(vert&&horiz)||(vert&&y%3===0)||(horiz&&x%3===0);
+    if(pillar){ px(sx,sy,T,T,COL.pillar); }
+    else { px(sx,sy,T,T,COL.glass);
+      ctx.strokeStyle='rgba(255,255,255,0.45)'; ctx.lineWidth=1; ctx.strokeRect(sx+2.5,sy+2.5,T-5,T-5); }
+  }
+}
+
 function drawTrack(camX,camY){
   const cx=TRK.cx*T-camX, top=TRK.top*T-camY, bot=TRK.bot*T-camY, hw=TRK.halfW*T;
   ctx.save(); ctx.lineJoin='round'; ctx.lineCap='round';
@@ -209,8 +222,8 @@ function drawRooms(camX,camY){
     for(let yy=rm.y;yy<rm.y+rm.h;yy++) for(let xx=rm.x;xx<rm.x+rm.w;xx++){
       const dX=xx*T-camX, dY=yy*T-camY;
       const wk=roomWallKey(rm,xx,yy), door=isRoomDoor(rm,xx,yy);
-      if(wk&&!door){ const [c,r]=NS[wk]; ctx.drawImage(sheet,c*TS,r*TS,TS,TS,dX,dY,T,T); }
-      else { const [c,r]=rm.floor||FLOOR_TAN; ctx.drawImage(sheet,c*TS,r*TS,TS,TS,dX,dY,T,T); }
+      if(wk&&!door){ px(dX,dY,T,T,COL.roomW); px(dX,dY,T,4,COL.roomWd); }   // wall + top shade
+      else { px(dX,dY,T,T,rm.floor||COL.roomF); }                          // room floor
     }
   }
 }
@@ -230,14 +243,10 @@ function drawWorld(){
   const mapW=W*T, mapH=H*T;
   camX=clamp(Math.round(player.x-VW/2),0,mapW-VW);
   camY=clamp(Math.round(player.y-VH/2),0,mapH-VH);
-  // floor + walls (only visible tiles)
+  // dark carpet floor + glass-facade perimeter walls (visible tiles only)
   const x0=Math.floor(camX/T), x1=Math.ceil((camX+VW)/T);
   const y0=Math.floor(camY/T), y1=Math.ceil((camY+VH)/T);
-  for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){
-    if(x<0||y<0||x>=W||y>=H) continue;
-    const [c,r]=NS[wallKey(x,y)];
-    ctx.drawImage(sheet, c*TS,r*TS,TS,TS, x*T-camX, y*T-camY, T,T);
-  }
+  drawShell(x0,x1,y0,y1,camX,camY);
   drawTrack(camX,camY);
   drawRooms(camX,camY);
   // depth-sorted objects + characters
@@ -275,10 +284,11 @@ function draw(){
   if(dialog) drawDialog();
 }
 function drawTitle(){
-  px(0,0,VW,VH,'#caa46a');
-  // blurred peek of the room behind the title
-  for(let y=0;y<10;y++)for(let x=0;x<15;x++){ const [c,r]=NS[wallKey((x+3)%W,(y+2)%H)];
-    ctx.drawImage(sheet,c*TS,r*TS,TS,TS,x*T,y*T,T,T); }
+  // dark carpet backdrop with the orange track swoosh
+  for(let y=0;y<VH/T+1;y++)for(let x=0;x<VW/T+1;x++) px(x*T,y*T,T,T,(x+y)&1?COL.carpetB:COL.carpetA);
+  ctx.save(); ctx.lineJoin='round'; ctx.lineCap='round';
+  ctx.beginPath(); ctx.roundRect(VW/2-40,-60,80,VH+120,40);
+  ctx.lineWidth=42; ctx.strokeStyle='#e8822c'; ctx.stroke(); ctx.restore();
   px(0,0,VW,VH,'rgba(20,24,40,0.55)');
   px(70,108,340,70,'#11141c'); px(74,112,332,62,'#2f3647');
   ctx.fillStyle='#ffd166';ctx.font='28px "Press Start 2P", monospace';ctx.textAlign='center';ctx.textBaseline='middle';
