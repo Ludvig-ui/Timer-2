@@ -44,8 +44,10 @@ function consume(b){if(pressed[b]){pressed[b]=false;return true;}return false;}
 const sheet=new Image(); let sheetReady=false;
 sheet.onload=()=>{ sheetReady=true; }; sheet.src='assets/tiles/urban.png';
 
-// ---------- map definition ----------
-const W=22,H=16;
+// ---------- map definition (HATHOUSE ground floor, rectified ~23x56 m) ----------
+const W=16,H=36;
+// running track (löparbanan) — stadium loop down the centre
+const TRK={cx:8, top:4, bot:30, halfW:2};
 // tan-room nine-slice (walls), sheet rows 3-5 cols 0-2
 const NS={TL:[0,3],T:[1,3],TR:[2,3],L:[0,4],C:[1,4],R:[2,4],BL:[0,5],B:[1,5],BR:[2,5]};
 function wallKey(x,y){
@@ -56,26 +58,28 @@ function wallKey(x,y){
 }
 // objects: [scol,srow,wt,ht, tx,ty]
 const OBJ=[
-  // reception (top center)
-  [9,13,2,1, 9,2],[11,10,1,1, 9,1],[11,10,1,1, 10,1],[16,8,1,2, 8,2],
-  // desk pods (left)
-  [5,10,1,1, 2,4],[5,10,1,1, 4,4],
-  [5,10,1,1, 2,6],[5,10,1,1, 4,6],
-  [5,10,1,1, 2,8],[5,10,1,1, 4,8],
-  // bookshelves (top-left wall)
-  [7,10,1,1, 2,1],[7,10,1,1, 3,1],[7,10,1,1, 4,1],
-  // meeting room (top right)
-  [5,10,1,1, 16,3],[5,10,1,1, 17,3],[5,10,1,1, 16,4],[5,10,1,1, 17,4],
-  [16,8,1,2, 19,2],[7,10,1,1, 19,1],
-  // lounge (bottom left)
-  [4,12,3,1, 2,13],[7,12,2,1, 2,11],[5,10,1,1, 5,12],
-  [16,8,1,2, 1,11],[17,8,1,2, 6,12],
-  // kitchen (bottom right)
-  [9,13,2,1, 15,13],[9,13,2,1, 17,13],[9,9,1,1, 19,14],[16,8,1,2, 14,12],
-  // greenery / decor
-  [16,8,1,2, 9,8],[17,8,1,2, 12,7],
+  // top feature (around the track's top curve)
+  [16,8,1,2, 2,2],[16,8,1,2,13,2],[7,12,2,1, 2,4],[7,12,2,1,12,4],
+  // upper open office (left & right of the track)
+  [5,10,1,1,2,7],[5,10,1,1,3,7],[5,10,1,1,2,9],[5,10,1,1,3,9],
+  [5,10,1,1,12,7],[5,10,1,1,13,7],[5,10,1,1,12,9],[5,10,1,1,13,9],
+  [7,10,1,1,1,6],[7,10,1,1,1,10],[7,10,1,1,14,6],[7,10,1,1,14,10],
+  [5,10,1,1,2,12],[5,10,1,1,3,12],[5,10,1,1,12,12],[5,10,1,1,13,12],
+  // kitchen / pentry (inside loop, top)
+  [9,13,2,1,7,9],[9,9,1,1,9,10],[16,8,1,2,7,7],
+  // meeting tables (inside loop, middle)
+  [5,10,1,1,7,16],[5,10,1,1,8,16],[5,10,1,1,7,17],[5,10,1,1,8,17],
+  // lower open office
+  [5,10,1,1,2,18],[5,10,1,1,3,18],[5,10,1,1,12,18],[5,10,1,1,13,18],
+  // lounge / café (lower)
+  [4,12,3,1,1,24],[7,12,2,1,12,24],[5,10,1,1,3,26],[16,8,1,2,1,22],[16,8,1,2,13,22],
+  [9,13,2,1,7,23],[16,8,1,2,8,21],
+  // reception / entrance (bottom)
+  [9,13,2,1,7,30],[16,8,1,2,6,29],[7,12,2,1,10,31],[16,8,1,2,2,31],
+  // greenery
+  [17,8,1,2,4,15],[17,8,1,2,11,15],[16,8,1,2,4,33],[16,8,1,2,10,33],
   // entrance door (bottom wall)
-  [12,10,1,1, 10,15],
+  [12,10,1,1,8,35],
 ];
 // collision grid (true = solid)
 const collide=Array.from({length:H},()=>Array(W).fill(false));
@@ -87,22 +91,25 @@ for(const [sc,sr,wt,ht,tx,ty] of OBJ){          // only the bottom row of a foot
 
 // interaction hotspots: tile center + message
 const SPOTS=[
-  {tx:9.5,ty:2, r:1.6, text:'RECEPTIONEN: Välkommen till HATHOUSE! Skriv upp dig i loggboken så bjuder vi på kaffe.'},
-  {tx:3,  ty:6, r:1.8, text:'SKRIVBORDEN: Full fart i dag. Doften av nyrostat kaffe och tangentbordsklatter.'},
-  {tx:16.5,ty:3.5,r:1.8,text:'MÖTESRUMMET: "Mötet börjar strax." Whiteboarden är full av idéer.'},
-  {tx:3,  ty:13,r:2.0, text:'LOUNGEN: Sköna soffor. Slå dig ner och ta en paus.'},
-  {tx:16.5,ty:13,r:1.8,text:'KÖKET: Dags för fika? Det står bullar framme. ☕'},
-  {tx:3,  ty:1, r:1.6, text:'BOKHYLLAN: Massor av kunskap (och några gamla designprylar).'},
-  {tx:10.5,ty:15,r:1.4,text:'UTGÅNGEN: Men festen är ju här inne!'},
+  {tx:8, ty:33,r:2.0, text:'RECEPTIONEN: Välkommen till HATHOUSE! Skriv upp dig i loggboken så bjuder vi på kaffe.'},
+  {tx:8, ty:23,r:1.8, text:'CAFÉT: Espresso, bullar och en skön soffa. Dagens bästa plats.'},
+  {tx:8, ty:9, r:1.8, text:'PENTRYT: Diskmaskinen är (nästan) alltid tom. Ta en kaffe! ☕'},
+  {tx:8, ty:16.5,r:1.8,text:'MÖTESRUMMET: "Mötet börjar strax." Whiteboarden är full av idéer.'},
+  {tx:3, ty:9, r:2.0, text:'ÖPPNA KONTORET: Full fart i dag. Tangentbordsklatter och fokus-musik.'},
+  {tx:13,ty:9, r:2.0, text:'ÖPPNA KONTORET: Här sitter teamet. Säg hej till alla!'},
+  {tx:2, ty:24,r:2.0, text:'LOUNGEN: Sköna soffor. Slå dig ner och ta en paus.'},
+  {tx:8, ty:20,r:1.6, text:'LÖPARBANAN: Japp — en riktig löparbana rakt genom kontoret. Spring ett varv! 🏃'},
+  {tx:8, ty:34,r:1.4, text:'Mot AUTOSTORE-lagret... men det är nästa uppdatering. 😉'},
 ];
 
 // NPCs: tile pos, character index (1..5), facing, message
 const NPCS=[
-  {tx:10,ty:3, char:1, dir:'up',   text:'Hej och välkommen! Trevligt att ha dig på kontoret. 😊'},
-  {tx:3, ty:5, char:3, dir:'up',   text:'Deadline i dag... men det löser sig. Det gör det alltid.'},
-  {tx:15,ty:4, char:4, dir:'right',text:'Vi brainstormar nya idéer. Häng på om du vill!'},
-  {tx:6, ty:13,char:5, dir:'left', text:'Fikan är dagens bästa stund, om du frågar mig.'},
-  {tx:16,ty:12,char:2, dir:'down', text:'Tar en kopp kaffe innan nästa möte. Vill du ha?'},
+  {tx:6, ty:31,char:1, dir:'up',   text:'Hej och välkommen till HATHOUSE! Trevligt att ha dig här. 😊'},
+  {tx:4, ty:8, char:3, dir:'right',text:'Deadline i dag... men det löser sig. Det gör det alltid.'},
+  {tx:11,ty:8, char:4, dir:'left', text:'Vi brainstormar nya idéer. Häng på om du vill!'},
+  {tx:10,ty:16,char:2, dir:'left', text:'Mötet börjar strax. Hämtar bara en kaffe först.'},
+  {tx:11,ty:23,char:5, dir:'left', text:'Fikan är dagens bästa stund, om du frågar mig.'},
+  {tx:10,ty:20,char:2, dir:'up',   text:'*flåsar* ...tar bara ett varv till på banan. Häng med!'},
 ];
 // NPCs block their tile
 for(const n of NPCS){ if(n.ty>=0&&n.ty<H&&n.tx>=0&&n.tx<W) collide[n.ty][n.tx]=true;
@@ -119,7 +126,7 @@ function drawChar(ci,dir,frameRow,feetX,feetY,camX,camY){
 }
 
 // ---------- player ----------
-const player={ x:10.5*T, y:9*T, dir:'down', moving:false, walkPhase:0, char:0 };
+const player={ x:8*T+T/2, y:32*T+T/2, dir:'up', moving:false, walkPhase:0, char:0 };
 
 // ---------- collision helpers ----------
 function solidPx(px,py){ const tx=Math.floor(px/T), ty=Math.floor(py/T);
@@ -161,6 +168,18 @@ function updateWorld(dt){
 function px(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(x,y,w,h);}
 function clamp(v,a,b){return v<a?a:v>b?b:v;}
 
+function drawTrack(camX,camY){
+  const cx=TRK.cx*T-camX, top=TRK.top*T-camY, bot=TRK.bot*T-camY, hw=TRK.halfW*T;
+  ctx.save(); ctx.lineJoin='round'; ctx.lineCap='round';
+  // orange lane
+  ctx.beginPath(); ctx.roundRect(cx-hw, top, 2*hw, bot-top, hw);
+  ctx.lineWidth=1.2*T; ctx.strokeStyle='#e8822c'; ctx.stroke();
+  // subtle inner lane marking
+  ctx.beginPath(); ctx.roundRect(cx-hw, top, 2*hw, bot-top, hw);
+  ctx.lineWidth=2; ctx.strokeStyle='rgba(255,224,180,0.65)'; ctx.setLineDash([12,12]); ctx.stroke();
+  ctx.setLineDash([]); ctx.restore();
+}
+
 function drawWorld(){
   const mapW=W*T, mapH=H*T;
   camX=clamp(Math.round(player.x-VW/2),0,mapW-VW);
@@ -173,6 +192,7 @@ function drawWorld(){
     const [c,r]=NS[wallKey(x,y)];
     ctx.drawImage(sheet, c*TS,r*TS,TS,TS, x*T-camX, y*T-camY, T,T);
   }
+  drawTrack(camX,camY);
   // depth-sorted objects + characters
   const list=[];
   for(const [sc,sr,wt,ht,tx,ty] of OBJ)
