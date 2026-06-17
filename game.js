@@ -60,7 +60,7 @@ function wallKey(x,y){
 const ROOMS=[
   {x:6,y:8, w:5,h:4, door:['L',2], label:'FOKUS'},
   {x:6,y:11,w:5,h:4, door:['R',2], label:'MOTE B'},
-  {x:6,y:14,w:5,h:4, floor:'#c9cdd3', door:['L',2], label:'WC'},
+  {x:6,y:14,w:5,h:4, wc:true, door:['L',2], label:'WC'},
   {x:6,y:17,w:5,h:4, door:['R',2], label:'MOTE'},
   {x:6,y:20,w:5,h:6, door:['L',4], label:'KONFERENS'},
 ];
@@ -188,21 +188,37 @@ function updateWorld(dt){
 function px(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(x,y,w,h);}
 function clamp(v,a,b){return v<a?a:v>b?b:v;}
 
-// --- look (matches the concept render) ---
-const COL={carpetA:'#44484f',carpetB:'#3e424a',glass:'#bfe3f0',pillar:'#363a42',
-  roomW:'#6e747e',roomWd:'#4e535c',roomF:'#4a4e56',wcF:'#c9cdd3'};
+// --- look: pre-rendered cozy pixel tiles (Stardew-ish) ---
+function makeTile(paint){ const c=document.createElement('canvas'); c.width=16;c.height=16;
+  const g=c.getContext('2d'); g.imageSmoothingEnabled=false; paint(g); return c; }
+function speckle(g,base,dark,light){ g.fillStyle=base; g.fillRect(0,0,16,16);
+  for(let y=0;y<16;y++)for(let x=0;x<16;x++){ const h=((x*7+y*13)^(x*5+3))&7;
+    if(h===0){g.fillStyle=dark;g.fillRect(x,y,1,1);} else if(h===1){g.fillStyle=light;g.fillRect(x,y,1,1);} } }
+const TILE={
+  carpet:   makeTile(g=>speckle(g,'#3b3f47','#34383f','#42464e')),
+  roomFloor:makeTile(g=>speckle(g,'#464b54','#3e434b','#4e535c')),
+  wc:       makeTile(g=>{ g.fillStyle='#c7ccd2';g.fillRect(0,0,16,16);
+              g.fillStyle='#b3b9c1'; g.fillRect(0,7,16,1); g.fillRect(7,0,1,16); g.fillRect(0,15,16,1); g.fillRect(15,0,1,16); }),
+  pillar:   makeTile(g=>{ g.fillStyle='#23262b';g.fillRect(0,0,16,16);
+              g.fillStyle='#3a3f47';g.fillRect(2,0,12,16); g.fillStyle='#4a505a';g.fillRect(2,0,3,16);
+              g.fillStyle='#2b2f35';g.fillRect(11,0,3,16); }),
+  glass:    makeTile(g=>{ g.fillStyle='#2f333a';g.fillRect(0,0,16,16);
+              g.fillStyle='#bfe3f0';g.fillRect(2,2,12,12);
+              g.fillStyle='#d8f1f8';g.fillRect(2,2,12,4);
+              g.fillStyle='#9cc6d6';g.fillRect(8,2,1,12); g.fillRect(2,8,12,1);
+              g.fillStyle='#eaf8fc';g.fillRect(3,3,3,3); }),
+  roomWall: makeTile(g=>{ g.fillStyle='#565c66';g.fillRect(0,0,16,16);
+              g.fillStyle='#6c727c';g.fillRect(0,0,16,5); g.fillStyle='#454a53';g.fillRect(0,13,16,3); }),
+};
 function drawShell(x0,x1,y0,y1,camX,camY){
   for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){
     if(x<0||y<0||x>=W||y>=H) continue;
     const sx=x*T-camX, sy=y*T-camY;
-    px(sx,sy,T,T,(x+y)&1?COL.carpetB:COL.carpetA);          // carpet checker
-    const border=(x===0||y===0||x===W-1||y===H-1);
-    if(!border) continue;
+    ctx.drawImage(TILE.carpet,sx,sy,T,T);
+    const border=(x===0||y===0||x===W-1||y===H-1); if(!border) continue;
     const vert=(x===0||x===W-1), horiz=(y===0||y===H-1);
-    const pillar=(vert&&horiz)||(vert&&y%3===0)||(horiz&&x%3===0);
-    if(pillar){ px(sx,sy,T,T,COL.pillar); }
-    else { px(sx,sy,T,T,COL.glass);
-      ctx.strokeStyle='rgba(255,255,255,0.45)'; ctx.lineWidth=1; ctx.strokeRect(sx+2.5,sy+2.5,T-5,T-5); }
+    const isPillar=(vert&&horiz)||(vert&&y%3===0)||(horiz&&x%3===0);
+    ctx.drawImage(isPillar?TILE.pillar:TILE.glass,sx,sy,T,T);
   }
 }
 
@@ -222,8 +238,8 @@ function drawRooms(camX,camY){
     for(let yy=rm.y;yy<rm.y+rm.h;yy++) for(let xx=rm.x;xx<rm.x+rm.w;xx++){
       const dX=xx*T-camX, dY=yy*T-camY;
       const wk=roomWallKey(rm,xx,yy), door=isRoomDoor(rm,xx,yy);
-      if(wk&&!door){ px(dX,dY,T,T,COL.roomW); px(dX,dY,T,4,COL.roomWd); }   // wall + top shade
-      else { px(dX,dY,T,T,rm.floor||COL.roomF); }                          // room floor
+      if(wk&&!door) ctx.drawImage(TILE.roomWall,dX,dY,T,T);
+      else ctx.drawImage(rm.wc?TILE.wc:TILE.roomFloor,dX,dY,T,T);
     }
   }
 }
@@ -285,7 +301,7 @@ function draw(){
 }
 function drawTitle(){
   // dark carpet backdrop with the orange track swoosh
-  for(let y=0;y<VH/T+1;y++)for(let x=0;x<VW/T+1;x++) px(x*T,y*T,T,T,(x+y)&1?COL.carpetB:COL.carpetA);
+  for(let y=0;y<VH/T+1;y++)for(let x=0;x<VW/T+1;x++) ctx.drawImage(TILE.carpet,x*T,y*T,T,T);
   ctx.save(); ctx.lineJoin='round'; ctx.lineCap='round';
   ctx.beginPath(); ctx.roundRect(VW/2-40,-60,80,VH+120,40);
   ctx.lineWidth=42; ctx.strokeStyle='#e8822c'; ctx.stroke(); ctx.restore();
