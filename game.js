@@ -40,9 +40,17 @@ bindTouch('dpad-up','up');bindTouch('dpad-down','down');bindTouch('dpad-left','l
 bindTouch('btn-a','a');bindTouch('btn-b','b');
 function consume(b){if(pressed[b]){pressed[b]=false;return true;}return false;}
 
-// ---------- spritesheet ----------
+// ---------- spritesheets ----------
 const sheet=new Image(); let sheetReady=false;
 sheet.onload=()=>{ sheetReady=true; }; sheet.src='assets/tiles/urban.png';
+const furnSheet=new Image(); let furnReady=false;
+furnSheet.onload=()=>{ furnReady=true; }; furnSheet.src='assets/furniture.png';
+// custom pixel furniture atlas: name -> [sx,sy,sw,sh]
+const FURN={desk:[56,71,276,199],ldesk:[409,71,291,215],chair:[803,56,128,220],pc:[92,322,76,184],
+  monitor:[255,358,183,133],monitor2:[501,358,189,133],dualmon:[727,348,255,148],filing:[665,578,117,189],
+  bookshelf:[829,558,138,209],laptop:[51,614,143,132],keyboard:[220,614,153,128],mouse:[414,624,51,117],
+  lamp:[507,594,117,158],printer:[51,819,143,153],phone:[230,839,128,133],mug:[399,839,102,117],
+  whiteboard:[640,834,169,133],clock:[839,829,133,138],sticky:[537,860,66,76]};
 
 // ---------- map definition (HATHOUSE ground floor, rectified ~23x56 m) ----------
 const W=16,H=36;
@@ -71,30 +79,35 @@ function roomWallKey(rm,xx,yy){const l=xx===rm.x,r=xx===rm.x+rm.w-1,t=yy===rm.y,
   if(!(l||r||t||b))return null;
   return t&&l?'TL':t&&r?'TR':b&&l?'BL':b&&r?'BR':t?'T':b?'B':l?'L':'R';}
 
-// objects: [scol,srow,wt,ht, tx,ty]
+// Kenney objects (plants, reception, WC, door): [scol,srow,wt,ht, tx,ty]
 const OBJ=[
-  // top lounge (top of the loop)
-  [7,12,2,1,6,5],[7,12,2,1,8,5],[16,8,1,2,5,4],[16,8,1,2,10,4],
-  // central rooms' furniture
-  [5,10,1,1,7,9],[5,10,1,1,8,9],          // focus
-  [5,10,1,1,7,12],[5,10,1,1,8,12],        // meeting B
-  [9,9,1,1,7,15],[9,9,1,1,8,15],          // WC fixtures
-  [5,10,1,1,7,18],[5,10,1,1,8,18],        // meeting
-  [5,10,1,1,7,22],[5,10,1,1,8,22],[5,10,1,1,7,23],[5,10,1,1,8,23], // konferens
-  // open-office desks ALONG the side walls (x1 left, x14 right)
-  [5,10,1,1,1,3],[5,10,1,1,14,3],[5,10,1,1,1,5],[5,10,1,1,14,5],
-  [5,10,1,1,1,7],[5,10,1,1,14,7],[5,10,1,1,1,9],[5,10,1,1,14,9],
-  [5,10,1,1,1,11],[5,10,1,1,14,11],[5,10,1,1,1,13],[5,10,1,1,14,13],
-  [5,10,1,1,1,15],[5,10,1,1,14,15],[5,10,1,1,1,17],[5,10,1,1,14,17],
-  [5,10,1,1,1,19],[5,10,1,1,14,19],[5,10,1,1,1,21],[5,10,1,1,14,21],
-  [5,10,1,1,1,23],[5,10,1,1,14,23],[5,10,1,1,1,25],[5,10,1,1,14,25],
-  // plants in the side corridors
+  // plants (greenery accents) along the side corridors
   [16,8,1,2,4,8],[16,8,1,2,11,8],[16,8,1,2,4,17],[16,8,1,2,11,17],[16,8,1,2,4,26],[16,8,1,2,11,26],
   // reception / entrance (bottom)
   [9,13,2,1,7,31],[16,8,1,2,6,30],[7,12,2,1,10,31],[4,12,3,1,1,33],
+  // WC fixtures
+  [9,9,1,1,7,15],[9,9,1,1,8,15],
   // entrance door (bottom wall)
   [12,10,1,1,8,35],
 ];
+// custom pixel furniture placements: {name,tx,ty,w, base?, solid?}
+// drawn anchored bottom-left at ((tx)*T, (ty+1)*T); base = depth key
+const NICE=[];
+(function buildNice(){
+  const ws=(tx,ty)=>{ NICE.push({name:'desk',tx,ty,w:2.2,solid:2});
+    NICE.push({name:'monitor',tx:tx+0.6,ty:ty-0.4,w:1.0,base:(ty+1)*T+2});
+    NICE.push({name:'chair',tx:tx+0.55,ty:ty+1.0,w:1.0,base:(ty+1)*T+10}); };
+  for(const ry of [3,7,11,15,19,23]){ ws(1,ry); ws(12,ry); }
+  NICE.push({name:'desk',tx:6.6,ty:9.6,w:2.0,solid:2});
+  NICE.push({name:'laptop',tx:7.2,ty:9.0,w:1.0,base:10.6*T});
+  NICE.push({name:'ldesk',tx:6.4,ty:13,w:2.6,solid:3});
+  NICE.push({name:'whiteboard',tx:8.7,ty:11.6,w:1.3,base:12*T});
+  NICE.push({name:'ldesk',tx:6.4,ty:19,w:2.6,solid:3});
+  NICE.push({name:'ldesk',tx:6.3,ty:24,w:2.8,solid:3});
+  NICE.push({name:'whiteboard',tx:8.6,ty:21.4,w:1.4,base:21.8*T});
+  NICE.push({name:'bookshelf',tx:1,ty:27,w:1.3,solid:1});
+  NICE.push({name:'filing',tx:14,ty:27,w:1.0,solid:1});
+})();
 // collision grid (true = solid)
 const collide=Array.from({length:H},()=>Array(W).fill(false));
 for(let y=0;y<H;y++)for(let x=0;x<W;x++) if(wallKey(x,y)!=='C') collide[y][x]=true;
@@ -106,6 +119,10 @@ for(const rm of ROOMS){                          // room walls solid (except the
 for(const [sc,sr,wt,ht,tx,ty] of OBJ){          // only the bottom row of a footprint blocks
   const by=ty+ht-1;
   for(let dx=0;dx<wt;dx++){ const X=tx+dx; if(X>=0&&X<W&&by>=0&&by<H) collide[by][X]=true; }
+}
+for(const it of NICE){ if(!it.solid) continue;  // custom furniture footprints block
+  const bx=Math.floor(it.tx), by=it.ty;
+  for(let i=0;i<it.solid;i++){ const X=bx+i; if(X>=0&&X<W&&by>=0&&by<H) collide[by][X]=true; }
 }
 
 // interaction hotspots: tile center + message
@@ -233,6 +250,14 @@ function drawTrack(camX,camY){
   ctx.lineWidth=2; ctx.strokeStyle='rgba(255,224,180,0.65)'; ctx.setLineDash([12,12]); ctx.stroke();
   ctx.setLineDash([]); ctx.restore();
 }
+function drawFurn(name,tx,ty,w,camX,camY){
+  const f=FURN[name]; if(!f) return; const [sx,sy,sw,sh]=f;
+  const wpx=w*T, hpx=wpx*sh/sw;
+  const dx=Math.round(tx*T-camX), dy=Math.round((ty+1)*T-hpx-camY);
+  ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(furnSheet,sx,sy,sw,sh,dx,dy,wpx,hpx);
+  ctx.imageSmoothingEnabled=false;
+}
 function drawRooms(camX,camY){
   for(const rm of ROOMS){
     for(let yy=rm.y;yy<rm.y+rm.h;yy++) for(let xx=rm.x;xx<rm.x+rm.w;xx++){
@@ -269,6 +294,7 @@ function drawWorld(){
   const list=[];
   for(const [sc,sr,wt,ht,tx,ty] of OBJ)
     list.push({base:(ty+ht)*T, kind:'obj', sc,sr,wt,ht,tx,ty});
+  if(furnReady) for(const f of NICE) list.push({base:f.base||(f.ty+1)*T, kind:'nice', f});
   for(const n of NPCS){
     const fr=0; list.push({base:n.y, kind:'char', ci:n.char, dir:n.dir, fr, x:n.x, y:n.y});
   }
@@ -279,6 +305,8 @@ function drawWorld(){
     if(it.kind==='obj'){
       ctx.drawImage(sheet, it.sc*TS,it.sr*TS, it.wt*TS,it.ht*TS,
         it.tx*T-camX, it.ty*T-camY, it.wt*T, it.ht*T);
+    } else if(it.kind==='nice'){
+      drawFurn(it.f.name,it.f.tx,it.f.ty,it.f.w,camX,camY);
     } else {
       // soft shadow
       ctx.fillStyle='rgba(0,0,0,0.18)';
