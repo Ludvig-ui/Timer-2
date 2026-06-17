@@ -1,0 +1,4 @@
+Tileset: Kenney "RPG Urban Pack" (tilemap_packed.png)
+Author: Kenney (www.kenney.nl)
+License: CC0 1.0 Universal (public domain) — free for commercial use, no attribution required.
+Mirror used: github.com/PBMCube/kenney-rpg-urban-pack-phaser-game

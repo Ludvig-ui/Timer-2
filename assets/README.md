@@ -1,15 +1,10 @@
-# Sprite assets
+# Assets
 
-The game loads these PNGs at runtime. If a file is missing the game falls back to
-hand-drawn canvas sprites, so the demo stays playable.
+The game is a top-down tilemap built on a single CC0 spritesheet.
 
-| File | What it is | Recommended |
-|------|-----------|-------------|
-| `cap_snapback.png` | Snapback cap creature (front view) | square, transparent bg |
-| `cap_camp.png` | 5-panel cap creature (front view) | square, transparent bg |
-| `cap_bucket.png` | Bucket hat creature (front view) | square, transparent bg |
-| `player.png` | Player trainer (facing down) | ~20x22, transparent bg |
-| `capsule.png` | Capture item icon | small, transparent bg |
+| File | What it is | License |
+|------|-----------|---------|
+| `tiles/urban.png` | Kenney "RPG Urban Pack" tilesheet (16px tiles, 27×18) — floors, walls, furniture, plants and 6 walkable characters (4 directions, 3-frame walk). | CC0 1.0 (public domain) |
 
-These are AI-generated with Magnific in a 16-bit GBA pixel-art style. Drop the final
-transparent PNGs here with the exact filenames above and they take over automatically.
+See `tiles/LICENSE.txt` for source/credit. The engine (`../game.js`) slices tiles
+straight from the sheet by `(col,row)`, so no per-asset files are needed.
